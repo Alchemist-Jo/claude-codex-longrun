@@ -1,0 +1,21 @@
+{
+  "project": "<name>",
+  "workers": [
+    {
+      "id": "w01",
+      "route": "codex",
+      "status": "planned",
+      "brief": "harness/briefs/w01.md",
+      "writes": [
+        "src/module.py",
+        "tests/test_module.py"
+      ],
+      "base": "main@0000000",
+      "worktree": "../wt/w01",
+      "host": "local",
+      "out": "harness/runs/w01-r1/",
+      "session": "",
+      "round": 1
+    }
+  ]
+}

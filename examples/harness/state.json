@@ -1,0 +1,81 @@
+{
+  "project": "evalkit, a fictional evaluation tool",
+  "workers": [
+    {
+      "id": "a03",
+      "route": "advisor",
+      "status": "done",
+      "brief": "harness/advice/a03-question.md",
+      "writes": [],
+      "host": "local",
+      "out": "harness/runs/a03/"
+    },
+    {
+      "id": "w12",
+      "route": "codex",
+      "status": "changes",
+      "brief": "harness/briefs/w12.md",
+      "writes": [
+        "src/evalkit/runner.py",
+        "tests/test_runner.py"
+      ],
+      "base": "main@3f2c1aa",
+      "worktree": "../wt/w12",
+      "host": "local",
+      "log": "harness/runs/w12-r1/stdout.log",
+      "out": "harness/runs/w12-r1/",
+      "session": "01a13bbd-7a71-7640-961c-682cf16eb66c",
+      "round": 1
+    },
+    {
+      "id": "r12-1",
+      "route": "subagent",
+      "status": "done",
+      "brief": "harness/briefs/r12-1.md",
+      "writes": [],
+      "out": "harness/reviews/w12-r1.md"
+    },
+    {
+      "id": "w13",
+      "route": "codex",
+      "status": "running",
+      "brief": "harness/briefs/w13.md",
+      "writes": [
+        "src/evalkit/report.py",
+        "docs/report-format.md"
+      ],
+      "base": "main@3f2c1aa",
+      "worktree": "../wt/w13",
+      "host": "local",
+      "pid": 51877,
+      "log": "harness/runs/w13-r1/stdout.log",
+      "out": "harness/runs/w13-r1/",
+      "round": 1
+    },
+    {
+      "id": "w14",
+      "route": "codex",
+      "status": "planned",
+      "brief": "harness/briefs/w14.md",
+      "writes": [
+        "src/evalkit/runner.py",
+        "src/evalkit/cli.py"
+      ],
+      "base": "main@3f2c1aa",
+      "worktree": "../wt/w14",
+      "host": "local",
+      "out": "harness/runs/w14-r1/"
+    },
+    {
+      "id": "p07",
+      "route": "paid-run",
+      "status": "running",
+      "brief": "harness/runs/p07/launch-record.md",
+      "writes": [],
+      "host": "gpu-host",
+      "pid": 48211,
+      "log": "harness/runs/p07/stdout.log",
+      "out": "harness/runs/p07/"
+    }
+  ]
+}

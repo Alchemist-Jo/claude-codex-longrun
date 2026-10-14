@@ -1,0 +1,7 @@
+interface:
+  display_name: "Claude Codex Long Run"
+  short_description: "Route work across Claude subagents and Codex, and keep long multi-agent runs stable"
+  default_prompt: "Use $claude-codex-longrun to route this work between the main session, subagents and Codex, with briefs, one writer per file, detached jobs and a review before anything counts as done."
+
+policy:
+  allow_implicit_invocation: true
