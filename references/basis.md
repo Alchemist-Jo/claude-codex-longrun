@@ -1,6 +1,6 @@
 # 方法依据与参考项目
 
-本文件说明各条规则的来源，常规使用无需读取。下列文档和项目是设计参考，不能作为本 skill 已改善协作效果的实验结论。核实日期为 2026-10-15。
+本文件说明各条规则的来源，常规使用无需读取。v1.0 的运行层与 v2.0 的仓库维护层分别记录。下列文档和项目是设计参考，不能作为本 skill 已改善协作效果的实验结论。核实日期为 2026-10-15。
 
 ## 用户的运行记录
 
@@ -15,6 +15,27 @@
 
 用户随后要求不以任务卡流程为主线，以路由清晰和运行稳定优先，并参照成熟的开源协作项目调整。本 skill 据此把上述分工改写为路由表和稳定性规则。
 
+## v2.0：仓库维护层
+
+v1.0 只覆盖一个工作周期之内的协作。用户随后提供了 [WncFht/agent-maintenance](https://github.com/WncFht/agent-maintenance)，它从 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 固定提交 `5719020` 提取并中文化了文档维护、Agent Notes、分层 AGENTS.md、hooks 与 CI 的规则，要求把两者合成一个管理项目目录和代理执行手册的 skill。v2.0 按内容的生命周期划分目录：常驻规则在 AGENTS.md，跨周期的事实与理由在 `docs/` 和 `.agents/notes/`，单个周期的记录在 `.agents/work/`。英文规则从上游英文原文改写，没有从中文版回译。
+
+| agent-maintenance 的内容 | 处理 | 理由 |
+| --- | --- | --- |
+| 分层 AGENTS.md：根文件短，子目录只补充，进入未加载目录前显式读取 | 保留 | 与 Codex 和 Claude Code 的实测加载行为一致 |
+| 文档分工表，一项事实一个归属 | 保留，见 documentation.md | 项目目录管理的核心规则 |
+| Notes 生命周期、取代与合并、实施后改写为现在时、不虚构替代方案 | 保留，章节改为英文，增加 `experiment` 分类 | 研究项目的评测口径与实验协议需要长期理由 |
+| 归档 SHA-256 清单、`--seal`、可信基线 CI job | 删除，改为 git diff 只允许新增 | 有可信基线时 git diff 已能检测改写；上游哈希还用于绑定中英文三件套，单语言不需要 |
+| 写作命题清单、会话残留判据、校准表 | 保留，见 prose.md | 多轮修改最容易留下轮次与评审引用 |
+| 暂存快照检查 | 保留原则，修正了 v1.0 pipeline | v1.0 在 worktree 中测试时写入集合外的改动仍在 |
+| `checks.json` 与调度器 | 保留思路，重写为顺序执行的精简版 | 一份清单供 pipeline、hooks、CI 共用 |
+| Node 格式化工具链、autocorrect、YAML 注释宽度、中文间距检查 | 不纳入 | 核心只依赖 Python 标准库与 git；格式化优先复用项目已有工具 |
+| `.claude/skills` 软链 | 不采用 | Claude Code 的 Edit/Write 拒绝经软链写入 |
+| 三个独立 skill | 并入本 skill 的 references | 按要求耦合为一个 skill |
+
+agent-maintenance 删去、v2.0 从上游取回的规则：评审先读要求再读 diff，发现写缺陷、位置、影响、证据（`dsh-code-review`）；每项行为变化需要回归时会失败的最窄检查，过滤后命中 0 个测试不算证据（`dsh-pre-push-checks`）；禁止用加大 timeout、重试、sleep、弱化断言掩盖不稳定测试（`dsh-ci-test-reliability`）；捕获异常不等于恢复（`dsh-error-handling`）；终止后等待进程组清空，退出码、信号、超时分别报告（`docs/defensive-patterns/general.md`）；无法复现的断言删除，只有依赖凭据或网络的断言可以保留并写明验证负责人（`dsh-doc`）；归档目录加入 `.rgignore`。
+
+agent-maintenance 的测试在 macOS 上有 1 项失败：`check_docs.check()` 直接调用时根路径未解析，而 macOS 的临时目录位于 `/var` 软链之后。命令行入口不受影响。本仓库的 `repo_check.py` 用不解析软链的路径比较，测试使用未解析的临时目录。
+
 ## 平台事实
 
 | 事实 | 来源 | 对设计的影响 |
@@ -25,6 +46,12 @@
 | `codex mcp-server` 命令和独立的 `codex-mcp-server` 已移除，集成应改用 app server | [OpenAI 文档](https://learn.chatgpt.com/docs/mcp-server) | 使用 `codex exec`，不依赖 MCP 桥接 |
 | `codex exec` 在 stdin 为管道时会把 stdin 追加到提示后；harness 中 stdin 未关闭会导致进程无输出地挂起 | `codex exec --help`；[skill-codex](https://github.com/skills-directory/skill-codex) 的说明 | `detach.sh` 为每个作业关闭 stdin |
 | 权限规则按 deny、ask、allow 的顺序匹配；复合命令按分隔符拆分后逐段匹配；规则不构成安全边界 | [Claude Code permissions](https://code.claude.com/docs/en/permissions) | 只为只读命令放行，启动和终止保留确认 |
+| Codex 每次运行开始时构建一次指令链：全局文件一个，再从 git 根目录逐级到 cwd，每个目录最多一个文件，合计达到 `project_doc_max_bytes`（默认 32 KiB）后停止追加 | [Codex 文档](https://learn.chatgpt.com/docs/agent-configuration/agents-md) | 工作说明列出写入集合所在子目录的 AGENTS.md；`repo_check.py` 检查每条链的大小 |
+| Claude Code 自 2.1.277 起原生读取 AGENTS.md，条件是工作目录及其上级没有 CLAUDE.md；子目录文件在读写该目录下的文件时加载；`@import` 的文件同样在启动时加载；内置 Explore 与 Plan 子代理不加载这些文件 | [Claude Code memory](https://code.claude.com/docs/en/memory)、[sub-agents](https://code.claude.com/docs/en/sub-agents) | AGENTS.md 作为唯一事实源；CLAUDE.md 只在首行导入它 |
+| 单个指令文件建议在 200 行以内；两条矛盾的指令可能被任选其一 | [Claude Code memory](https://code.claude.com/docs/en/memory) | 一项事实一个归属；超过 200 行给出警告 |
+| AGENTS.md 应作为目录而非百科，约 100 行；docs 为事实源，由 linter 与 CI 校验 | OpenAI "Harness engineering"，2026-02-11；原页返回 403，引文取自[镜像](https://github.com/celesteanders/harness/blob/main/docs/research/260211_openai_harness_engineering_codex.md) | 根 AGENTS.md 模板约 100 行，以地图为主 |
+| pre-commit 框架运行 hook 时暂存未暂存的改动，只检查暂存内容 | [pre-commit 文档](https://pre-commit.com/#pre-commit) | 提交 hook 不另做快照导出 |
+| 子代理每次执行 Bash 命令前工作目录都会重置，系统提示要求只用绝对路径 | Claude Code 子代理的系统提示，由独立评审代理引用 | 收集步骤写成一个使用绝对路径的脚本，不依赖单独的 `cd` |
 
 ## 本机实测
 
@@ -47,6 +74,36 @@
 
 在该环境中子代理结束回合并未终止其后台命令，作业与等待分离的设计仍然保留，依据有三项：#98273 记录的时间上限仍在无人值守会话中生效；用户的环境中出现过约 30 分钟的切断，原因未查明；远程作业需要在 SSH 断开后继续运行。
 
+### v2.0 实测
+
+环境为 codex-cli 0.159.2、Claude Code 2.1.284、macOS，日期 2026-10-15。v1.0 的运行时检查在同一天按文档命令原样重跑，结果与上表一致。
+
+| 测试 | 结果 |
+| --- | --- |
+| Codex 以 `-C <仓库根>` 启动，根目录与 `sub/` 各有一个带标记的 AGENTS.md | 只报告根目录标记 |
+| 同上，以 `-C <仓库根>/sub` 启动 | 报告两个标记 |
+| 无头 Claude Code 在只有 AGENTS.md 的目录启动，用户级 CLAUDE.md 存在 | 主会话读到项目 AGENTS.md |
+| 主会话派出 general-purpose 子代理，子代理读取 `sub/` 下的文件前后各报告一次 | 读取前只有根目录标记，读取后增加 `sub/AGENTS.md` 的标记 |
+| 项目 `.claude/settings.json` 中 matcher 为 `startup\|resume\|compact` 的 SessionStart hook | 启动时输出进入主会话，子代理看不到；`/compact` 后与 resume 时再次注入 |
+| `git merge --no-ff` 与分叉后的普通合并 | 触发 `pre-merge-commit`、`commit-msg`、`post-merge`，不触发 `pre-commit` |
+| `git merge --squash` 后 `git commit` | 触发 `pre-commit` 与 `commit-msg` |
+| linked worktree 中提交 | 使用主仓库的 hooks |
+| 写入集合内的改动依赖写入集合外的改动，按 v1.0 顺序在 worktree 中测试 | 检查通过，退出码 0 |
+| 同一改动按 v2.0 顺序：提交写入集合，把剩余改动存为 patch 与 tar，测试，再恢复 | 检查失败，退出码 1，对应 round commit 的真实状态；修改、删除和未跟踪文件均恢复 |
+
+`git stash` 的栈保存在共享的 git 目录中，所有 worktree 共用。两个 pipeline 同时收集时可能恢复对方的改动，因此 pipeline 不使用 stash。
+
+实现完成后的验证：
+
+| 测试 | 结果 |
+| --- | --- |
+| 在临时项目中按 adopt.md 第 2 步的命令原样接入，删除示例 worker | `run_checks.py` 的 commit 与 ci 模式、`repo_check.py`、`work_state.py` 均通过 |
+| 安装模板中的 pre-commit 配置后提交，再用 `--no-ff` 合并一个含断链的分支 | 提交时检查通过；合并由 `pre-merge-commit` 拦下，未生成合并提交 |
+| 把模板中的 SessionStart hook 合并进 `.claude/settings.json`，启动无头会话 | `$CLAUDE_PROJECT_DIR` 正常展开，现场信息与账本末行进入主会话 |
+| `collect_round.py` 的 7 项测试 | 写入集合外的依赖使检查失败；Codex 暂存的重命名不进入提交；Codex 自行提交与作业未结束时停止；从任意目录运行时主 checkout 不受影响 |
+
+独立评审代理审阅了实现，报告 1 个阻断问题、8 个应修问题和 6 个次要问题，均已处理。阻断问题是：runbook 要求子代理先单独执行 `cd` 再执行收集命令，而子代理的工作目录每次都会重置，新增的放置步骤会在主 checkout 中删除未跟踪文件。v1.0 的同一写法只会导致无效的 `git add`。该问题促成了 `collect_round.py`。
+
 ## 参考项目
 
 仓库元数据由调研子代理通过 GitHub API 获取。前三项的许可证和最近推送日期经主会话复核，其余项目因未认证 API 的速率限制未复核。未复制任何项目的代码或原文。
@@ -61,6 +118,27 @@
 | [humanlayer/humanlayer](https://github.com/humanlayer/humanlayer) | Apache-2.0 | 异常报告分为 Expected、Found、Why this matters；明确列出不做的内容；自动与人工验收分开 | 其余命令集 |
 | [skills-directory/skill-codex](https://github.com/skills-directory/skill-codex) | MIT | 关闭 stdin；分析任务默认只读沙箱 | 隐藏 stderr 作为默认 |
 | [wshobson/agents](https://github.com/wshobson/agents) | MIT | 一个文件只有一个所有者；共享类型归主导角色 | 签名收据插件 |
+| [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | MIT | 分层 AGENTS.md、Agent Notes 生命周期、会话残留清理、评审与验证选择、错误处理与可靠测试规则 | 中英文三件套、归档哈希清单、产品专用模板 |
+| [WncFht/agent-maintenance](https://github.com/WncFht/agent-maintenance) | MIT | 上游规则的可移植裁剪；检查清单与暂存快照 | 见上文 v2.0 一节 |
+
+v2.0 另调研了约 50 个项目，下列项目各提供了一项被采用的做法：
+
+| 项目 | 采用的做法 |
+| --- | --- |
+| [Fission-AI/OpenSpec](https://github.com/Fission-AI/OpenSpec) | 长期规格与单次变更分开存放；其记录的故障（两个并行变更先后归档，后者覆盖前者）促成收尾由一个写者串行执行 |
+| [burtenshaw/multiautoresearch](https://github.com/burtenshaw/multiautoresearch) | 研究记录只有一个写者；重复实验按同一父提交、同一子系统、同一假设判定 |
+| [gastownhall/beads](https://github.com/gastownhall/beads) | 通过 SessionStart hook 注入现场信息 |
+| [bmad-code-org/BMAD-METHOD](https://github.com/bmad-code-org/BMAD-METHOD) | 规则一旦由检查覆盖，就从指令文件删除 |
+| [anthropics/claude-quickstarts](https://github.com/anthropics/claude-quickstarts) autonomous-coding | 开局固定步骤；以文件判定完成 |
+| [agent-sh/agnix](https://github.com/agent-sh/agnix) | 按整条指令链校验 32 KiB 上限 |
+| [agent-sh/deslop](https://github.com/agent-sh/deslop) | 注释中评审轮次短语的探针 |
+| [npryce/adr-tools](https://github.com/npryce/adr-tools)、[adr/madr](https://github.com/adr/madr) | 决策记录的状态与双向取代链接 |
+| [jcszymansk/claude-review-loop](https://github.com/jcszymansk/claude-review-loop) | 评审首行格式错误按未通过处理 |
+| [ozgursagiroglu/arbab](https://github.com/ozgursagiroglu/arbab) | 端口租约；本 skill 用 `resources` 字段在派发前检查 |
+| [aroramrinaal/codex-claude-crew](https://github.com/aroramrinaal/codex-claude-crew) | 声明、观察、验证三者分开记录 |
+| [agentcrew-academy/claude-codex-harness-sync](https://github.com/agentcrew-academy/claude-codex-harness-sync) | 指出 Codex 不展开 `@` 导入，因此 AGENTS.md 作为事实源 |
+
+没有找到把多代理编排与仓库维护放在同一个 skill 中的项目。最接近的是 [AnastasiyaW/codex-claude-code-config](https://github.com/AnastasiyaW/codex-claude-code-config)，它没有派发 Codex 的运行机制、写入集合和有上限的评审轮次。
 
 ## Anthropic 工程文章
 
@@ -75,8 +153,15 @@ ruflo、oh-my-claudecode、gastown、BMAD-METHOD、SuperClaude 和 claude-task-m
 
 mcp_agent_mail 提供带有效期的文件租约。本 skill 的写入集合在派发前检查，状态文件只有主会话一个写入者，因此不需要运行时锁。
 
+rulesync 与 ruler 从一个目录生成各代理的规则文件。生成层会引入第二个事实源，而 Claude Code 与 Codex 都已直接读取 AGENTS.md，因此不采用。
+
+上游的归档哈希清单不采用，理由与 v1.0 删除冻结哈希清单相同：有可信基线时 git diff 已能回答归档文件是否被改写，哈希的结果不改变下一步操作。
+
 ## 尚未验证
 
 - 用户环境中约 30 分钟的切断对应 #83627 还是 #98273：原因未查明。本 skill 的等待设计对两种情况均适用。
 - 子代理是否继承会话的权限规则：本次查阅的官方文档未说明。
+- Codex 的全局 AGENTS.md 是否计入 32 KiB 上限：文档未明确，`repo_check.py` 只计算项目内的指令链。
+- SessionStart hook 在交互会话中自动压缩后的注入：只在无头会话中用 `/compact` 测试过。
+- GitHub Actions 中的检查是否被设为合并前必须通过：属于托管平台设置，本仓库无法验证。
 - 本 skill 尚未在一个完整项目周期中使用。示例目录只验证文件格式和检查脚本的行为。

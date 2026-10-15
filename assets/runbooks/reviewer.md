@@ -4,11 +4,13 @@ Role: check one change against its brief. Read-only. Do not fix, and propose not
 
 ## Inputs
 
-- Brief: `/abs/repo/harness/briefs/<worker>.md`
+- Brief: `/abs/repo/.agents/work/briefs/<worker>.md`
 - Worktree: `/abs/wt/<worker>`, at round commit `<from round-commit>`
 - Base: `<commit from state.json>`
-- Run directory: `/abs/repo/harness/runs/<worker>-r<n>/` with `diff.patch`, `fix.patch`, `outside.txt`, `last-message.md`, `exit-status`, `tests.log`, `tests-exit-status`
-- Previous verdict, from round 2 on: `/abs/repo/harness/reviews/<worker>-r<n-1>.md`
+- Run directory: `/abs/repo/.agents/work/runs/<worker>-r<n>/` with `diff.patch`, `fix.patch`, `outside.txt`, `outside.patch`, `outside-new.lst`, `last-message.md`, `exit-status`, `tests.log`, `tests-exit-status`
+- Previous verdict, from round 2 on: `/abs/repo/.agents/work/reviews/<worker>-r<n-1>.md`
+- Standing rules: the AGENTS.md files the brief names
+- Rules for documents and prose: `<skill>/references/documentation.md`, `<skill>/references/prose.md`
 
 ## Must-check points
 
@@ -16,24 +18,29 @@ Role: check one change against its brief. Read-only. Do not fix, and propose not
 
 ## Output
 
-Write the verdict to `/abs/repo/harness/reviews/<worker>-r<n>.md`. Stop if it already exists. Write nothing else.
+Write the verdict to `/abs/repo/.agents/work/reviews/<worker>-r<n>.md`. Stop if it already exists. Write nothing else.
 
 ## Steps
 
-1. Every entry in `outside.txt` is a requested change: revert that file.
-2. Read `diff.patch`, which runs from the base, and the code around it at the round commit. The last message is a claim to check, not evidence.
-3. Each acceptance item: met, not met or not verifiable, with a test-log line or a file and line.
-4. Each must-check point: the answer and its location.
-5. Compare the diff with the brief's out-of-scope list.
-6. From round 2 on, check `fix.patch` against the open items of the previous verdict, and confirm that earlier met items still hold.
+1. Read the brief, its acceptance items, out-of-scope list, standing rules and the must-check points before the diff.
+2. Every entry in `outside.txt` is a requested change: revert that file.
+3. Read `diff.patch`, which runs from the base, and the code around it at the round commit. The last message is a claim to check, not evidence.
+4. Read `tests.log`, which describes the round commit alone. A filtered test command that selected no tests is not evidence.
+5. Each acceptance item: met, not met or not verifiable, with a log line or a file and line. Where the brief added or changed a check, a case the check must reject exists and fails in the log.
+6. Each must-check point: the answer and its location.
+7. Repository: documentation and interface comments changed with behaviour; no session residue in code, comments or documents; documents outside the write set that the change makes wrong; rulings worth a note.
+8. Compare the diff with the brief's out-of-scope list.
+9. From round 2 on, check `fix.patch` against the open items of the previous verdict, confirm that earlier met items still hold, and weigh the writer's reasons for any change it declined.
+
+Each requested change names the defect, its file and location, the criterion it serves and the evidence. Leave out what a passing check already enforces, and preferences that no criterion supports.
 
 ## Verdict format
 
-First line `ACCEPT`, `REQUEST_CHANGES` or `BLOCKED`. Then the sections Acceptance, Must-check, Changes requested, each change with its file, location and the criterion it serves, and Outside the brief.
+First line exactly `ACCEPT`, `REQUEST_CHANGES` or `BLOCKED`. Then the sections Acceptance, Must-check, Repository, Changes requested and Outside the brief.
 
 ## Forbidden
 
-Editing any file other than the verdict. Running anything that writes, including the tests. Reading `.env` or credential files. Writing state or ledger. Starting another agent.
+Editing any file other than the verdict. Running anything that writes, including the checks. Reading `.env` or credential files. Writing state, ledger or notes. Starting another agent.
 
 ## Stop conditions
 

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.agents/bin/work_state.py\" \"$CLAUDE_PROJECT_DIR/.agents/work/state.json\" --bearings"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -15,9 +15,9 @@ These stay out: bugs, implementation detail, the choice between two implementati
 
 ## Steps
 
-1. A subagent drafts the question from the [question runbook](../assets/runbooks/question.md) into `harness/advice/a<NN>-question.md`.
+1. A subagent drafts the question from the [question runbook](../assets/runbooks/question.md) into `.agents/work/advice/a<NN>-question.md`.
 2. The main session edits the draft. The question must name the decision it informs and what evidence would change it.
-3. The main session runs Codex read-only at maximum effort, as in [dispatch](dispatch.md), with the answer written to `harness/advice/a<NN>-answer.md`.
+3. The main session runs Codex read-only at maximum effort, as in [dispatch](dispatch.md), with the answer written to `.agents/work/advice/a<NN>-answer.md`.
 4. The answer is kept verbatim. The main session writes its ruling to the ledger, citing the answer, before any brief depends on it.
 5. Briefs that follow cite the advice file and the ledger line in their Context section.
 

@@ -10,7 +10,7 @@ Role: draft one question for the design advisor. Read-only on the repository.
 
 ## Output
 
-`/abs/path/harness/advice/a<NN>-question.md`. Stop if it exists.
+`/abs/path/.agents/work/advice/a<NN>-question.md`. Stop if it exists.
 
 ## Steps
 

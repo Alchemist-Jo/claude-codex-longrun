@@ -1,20 +1,25 @@
-"""Check the harness state file and print the bearings for a new session.
+"""Check the work state file and print the bearings for a new session.
 
-The state file (default harness/state.json) lists every worker the main
+The state file (default .agents/work/state.json) lists every worker the main
 session has dispatched: Codex runs, subagents, advisor questions and paid
 runs. Only the main session writes it. This script reports, without changing
 anything:
 
-- workers whose write sets overlap while both hold them
+- workers whose write sets or resources overlap while both hold them
 - running processes without a log or a pid
 - two workers that share an output directory
 - briefs that do not exist
 - with --alive, local running processes that finished, which need
   collection, and those that died without an exit-status file
 
-With --dispatch ID the named worker is treated as holding its write set, so
-the check answers whether it can start now. With --summary the script prints
-the worker table first. Errors exit with status 1.
+With --dispatch ID the named worker is treated as holding its write set and
+resources, so the check answers whether it can start now. With --context ID
+the script lists the AGENTS.md files below the repository root that apply to
+the worker's write set; Codex started at the worktree root does not load
+them, so the brief names them. With --summary the script prints the worker
+table first. With --bearings it prints git status, the worker table, the
+liveness check and the ledger tail for a session start, and always exits 0.
+Errors exit with status 1.
 """
 from __future__ import annotations
 
@@ -23,20 +28,26 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 STATUSES = ("planned", "running", "review", "changes", "accepted", "merged", "done", "stopped", "abandoned")
 HOLDING = {"running", "review", "changes", "accepted"}
 CLOSED = {"merged", "done", "abandoned"}
-ROUTES = ("codex", "subagent", "advisor", "paid-run")
+ROUTES = ("codex", "subagent", "advisor", "paid-run", "main")
 PROCESS_ROUTES = {"codex", "advisor", "paid-run"}
 REQUIRED = ("id", "route", "status", "brief", "out")
 BASE = re.compile(r"^[^@\s]+@[0-9a-f]{7,40}$")
+DEFAULT_STATE = Path(".agents/work/state.json")
+
+
+def listed(worker: dict, key: str) -> list[str]:
+    value = worker.get(key) or []
+    return value if isinstance(value, list) else [value]
 
 
 def writes(worker: dict) -> list[str]:
-    value = worker.get("writes") or []
-    return value if isinstance(value, list) else [value]
+    return listed(worker, "writes")
 
 
 def overlaps(a: str, b: str) -> bool:
@@ -71,6 +82,11 @@ def pid_alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def repo_root(state: Path) -> Path:
+    """The state file sits at <root>/.agents/work/state.json."""
+    return state.resolve().parents[2]
 
 
 def load(path: Path) -> tuple[dict[str, dict], list[str]]:
@@ -129,17 +145,22 @@ def check_shared(workers: dict[str, dict], dispatch: str | None) -> list[str]:
             if key in outs:
                 problems.append(f"ERROR {worker_id} and {outs[key]} share output directory {out}; every run gets a new one")
             outs.setdefault(key, worker_id)
-    live = [w for w, worker in workers.items() if worker.get("status") not in CLOSED and writes(worker)]
+    live = [w for w, worker in workers.items()
+            if worker.get("status") not in CLOSED and (writes(worker) or listed(worker, "resources"))]
     for i, a in enumerate(live):
         for b in live[i + 1:]:
             if b in lineage(a, workers) or a in lineage(b, workers):
                 continue
             shared = sorted({describe(p, q) for p in writes(workers[a]) for q in writes(workers[b]) if overlaps(p, q)})
-            if not shared:
+            held = sorted(set(listed(workers[a], "resources")) & set(listed(workers[b], "resources")))
+            if not shared and not held:
                 continue
             holding = [w for w in (a, b) if workers[w].get("status") in HOLDING or w == dispatch]
             level = "ERROR" if len(holding) == 2 else "WARN"
-            problems.append(f"{level} {a} and {b} both write {', '.join(shared)}; run them in sequence or give the files to one combined brief")
+            if shared:
+                problems.append(f"{level} {a} and {b} both write {', '.join(shared)}; run them in sequence or give the files to one combined brief")
+            if held:
+                problems.append(f"{level} {a} and {b} both hold {', '.join(held)}; run them in sequence or assign another resource")
     return problems
 
 
@@ -161,19 +182,42 @@ def check_alive(workers: dict[str, dict], root: Path) -> list[str]:
     return problems
 
 
+def context(worker: dict, root: Path) -> list[str]:
+    """AGENTS.md files below the root that apply to the worker's write set."""
+    found: list[str] = []
+
+    def add(path: Path) -> None:
+        rel = path.relative_to(root).as_posix()
+        if rel not in found:
+            found.append(rel)
+
+    for entry in writes(worker):
+        target = root / entry
+        folder = target if entry.endswith("/") else target.parent
+        parts = folder.relative_to(root).parts
+        for depth in range(1, len(parts) + 1):
+            candidate = root.joinpath(*parts[:depth]) / "AGENTS.md"
+            if candidate.is_file():
+                add(candidate)
+        if entry.endswith("/") and folder.is_dir():
+            for candidate in sorted(folder.rglob("AGENTS.md")):
+                add(candidate)
+    return found
+
+
 def summary(workers: dict[str, dict]) -> str:
     rows = ["| Worker | Route | Status | Writes | Worktree | Out |", "| --- | --- | --- | --- | --- | --- |"]
     for worker_id, worker in workers.items():
+        held = [f"`{p}`" for p in writes(worker)] + listed(worker, "resources")
         rows.append("| {} | {} | {} | {} | {} | {} |".format(
             worker_id, worker.get("route", ""), worker.get("status", ""),
-            ", ".join(f"`{p}`" for p in writes(worker)) or "none",
-            worker.get("worktree", ""), worker.get("out", "")))
+            ", ".join(held) or "none", worker.get("worktree", ""), worker.get("out", "")))
     return "\n".join(rows) + "\n"
 
 
 def run(state: Path, dispatch: str | None = None, alive: bool = False) -> tuple[dict[str, dict], list[str]]:
     workers, problems = load(state)
-    root = state.resolve().parent.parent
+    root = repo_root(state)
     if dispatch:
         if dispatch not in workers:
             problems.append(f"ERROR --dispatch {dispatch}: no such worker")
@@ -188,18 +232,59 @@ def run(state: Path, dispatch: str | None = None, alive: bool = False) -> tuple[
     return workers, problems
 
 
+def bearings(state: Path) -> str:
+    """Read-only orientation for a session start, bounded in length."""
+    root = repo_root(state)
+    lines = []
+    for title, args in (("git status", ["status", "--short"]), ("worktrees", ["worktree", "list"]),
+                        ("recent commits", ["log", "--oneline", "-5"])):
+        result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
+        output = result.stdout.splitlines()
+        lines.append(f"## {title}")
+        lines.extend(output[:20] or ["(none)"])
+        if len(output) > 20:
+            lines.append(f"... {len(output) - 20} more lines")
+    workers, problems = run(state, alive=True)
+    lines.append("## workers")
+    lines.append(summary(workers).rstrip())
+    lines.extend(problems or ["State passed."])
+    ledger = state.parent / "ledger.md"
+    if ledger.is_file():
+        tail = [line for line in ledger.read_text(encoding="utf-8").splitlines() if line.strip()][-15:]
+        lines.append("## ledger, last entries")
+        lines.extend(tail)
+    lines.append("Reconcile finished and dead jobs before choosing the next route.")
+    return "\n".join(lines) + "\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("state", nargs="?", type=Path, default=Path("harness/state.json"))
+    parser.add_argument("state", nargs="?", type=Path, default=DEFAULT_STATE)
     parser.add_argument("--dispatch", metavar="ID", help="treat this planned worker as started")
+    parser.add_argument("--context", metavar="ID", help="list the AGENTS.md files that apply to this worker's write set")
     parser.add_argument("--alive", action="store_true", help="check that local running pids still exist")
     parser.add_argument("--summary", action="store_true", help="print the worker table")
+    parser.add_argument("--bearings", action="store_true", help="print the session-start bearings and exit 0")
     args = parser.parse_args()
+    if args.bearings:
+        if args.state.is_file():
+            try:
+                sys.stdout.write(bearings(args.state))
+            except (OSError, ValueError) as error:
+                print(f"bearings failed: {error}")
+        return 0
     try:
         workers, problems = run(args.state, args.dispatch, args.alive)
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1
+    if args.context:
+        if args.context not in workers:
+            print(f"ERROR --context {args.context}: no such worker", file=sys.stderr)
+            return 1
+        for path in context(workers[args.context], repo_root(args.state)):
+            print(path)
+        return 0
     if args.summary:
         sys.stdout.write(summary(workers))
     for problem in problems:

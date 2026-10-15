@@ -7,6 +7,7 @@ Written by the main session in the run directory before the launch. The watcher 
 | Command | `detach.sh <run dir> -- <exact command line>` |
 | Starts from | tag `freeze/<worker>` at `<commit>` |
 | Host | `<host>` |
+| Ports and devices | `<host>/port:<n>`, `<host>/gpus`, also listed under `resources` in the state file |
 | Expected duration | <hours> |
 | Expected cost | <amount and unit> |
 | Kill condition | <observable condition, such as a NaN loss in the log or no log line for 20 minutes> |

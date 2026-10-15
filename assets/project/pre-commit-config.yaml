@@ -1,0 +1,21 @@
+# Merge into the project's .pre-commit-config.yaml. A merge commit runs the
+# pre-merge-commit hook and never pre-commit, so install all three types:
+#   pre-commit install
+default_install_hook_types: [pre-commit, pre-merge-commit, pre-push]
+repos:
+  - repo: local
+    hooks:
+      - id: agent-commit-checks
+        name: Repository layer checks
+        entry: python3 .agents/bin/run_checks.py --mode commit
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit, pre-merge-commit]
+      - id: agent-ci-checks
+        name: Every check before a push
+        entry: python3 .agents/bin/run_checks.py --mode ci
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

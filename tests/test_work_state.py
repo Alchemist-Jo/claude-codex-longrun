@@ -1,4 +1,4 @@
-"""Tests for scripts/harness_state.py."""
+"""Tests for scripts/work_state.py."""
 from __future__ import annotations
 
 import json
@@ -9,9 +9,10 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+EXAMPLE = ROOT / "examples" / "project" / ".agents" / "work" / "state.json"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import harness_state  # noqa: E402
+import work_state  # noqa: E402
 
 
 def worker(worker_id: str, **fields) -> dict:
@@ -19,12 +20,12 @@ def worker(worker_id: str, **fields) -> dict:
         "id": worker_id,
         "route": "codex",
         "status": "planned",
-        "brief": f"harness/briefs/{worker_id}.md",
+        "brief": f".agents/work/briefs/{worker_id}.md",
         "writes": [],
         "base": "main@1a2b3c4",
         "worktree": f"../wt/{worker_id}",
         "host": "local",
-        "out": f"harness/runs/{worker_id}-r1/",
+        "out": f".agents/work/runs/{worker_id}-r1/",
     }
     entry.update(fields)
     return entry
@@ -33,17 +34,17 @@ def worker(worker_id: str, **fields) -> dict:
 class StateCase(unittest.TestCase):
     def state(self, *workers: dict, briefs: bool = True) -> Path:
         tmp = Path(tempfile.mkdtemp())
-        (tmp / "harness" / "briefs").mkdir(parents=True)
+        (tmp / ".agents" / "work" / "briefs").mkdir(parents=True)
         if briefs:
             for entry in workers:
                 (tmp / entry["brief"]).parent.mkdir(parents=True, exist_ok=True)
                 (tmp / entry["brief"]).write_text("brief\n", encoding="utf-8")
-        path = tmp / "harness" / "state.json"
+        path = tmp / ".agents" / "work" / "state.json"
         path.write_text(json.dumps({"workers": list(workers)}), encoding="utf-8")
         return path
 
     def problems(self, path: Path, **kwargs) -> list[str]:
-        return harness_state.run(path, **kwargs)[1]
+        return work_state.run(path, **kwargs)[1]
 
     def errors(self, path: Path, **kwargs) -> list[str]:
         return [p for p in self.problems(path, **kwargs) if p.startswith("ERROR")]
@@ -51,12 +52,12 @@ class StateCase(unittest.TestCase):
 
 class ExampleTests(StateCase):
     def test_example_passes_with_one_overlap_warning(self):
-        problems = self.problems(ROOT / "examples" / "harness" / "state.json")
+        problems = self.problems(EXAMPLE)
         self.assertEqual(len(problems), 1, problems)
         self.assertTrue(problems[0].startswith("WARN w12 and w14"))
 
     def test_dispatching_the_overlapping_worker_fails(self):
-        errors = self.errors(ROOT / "examples" / "harness" / "state.json", dispatch="w14")
+        errors = self.errors(EXAMPLE, dispatch="w14")
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("src/evalkit/runner.py", errors[0])
 
@@ -87,7 +88,7 @@ class OverlapTests(StateCase):
         path = self.state(
             worker("w1", status="changes", writes=["src/a.py"]),
             worker("w1.1", status="running", pid=1, log="a.log", writes=["src/a.py"], parent="w1",
-                   out="harness/runs/w1.1-r1/"),
+                   out=".agents/work/runs/w1.1-r1/"),
         )
         self.assertEqual(self.problems(path), [])
 
@@ -124,15 +125,23 @@ class FieldTests(StateCase):
         self.assertTrue(any("integer pid" in e for e in errors))
 
     def test_output_directories_are_never_shared(self):
-        path = self.state(worker("w1"), worker("w2", out="harness/runs/w1-r1"))
+        path = self.state(worker("w1"), worker("w2", out=".agents/work/runs/w1-r1"))
         self.assertTrue(any("share output directory" in e for e in self.errors(path)))
 
     def test_running_subagent_needs_no_pid_or_log(self):
-        path = self.state(worker("r1", route="subagent", status="running", worktree=None, out="harness/reviews/w1-r1.md"))
+        path = self.state(worker("r1", route="subagent", status="running", worktree=None, out=".agents/work/reviews/w1-r1.md"))
         self.assertEqual(self.errors(path), [])
 
+    def test_main_session_route_holds_files_without_a_pid(self):
+        path = self.state(
+            worker("w1.1", route="main", status="running", writes=["README.md"], out=".agents/work/runs/w1.1-r1/"),
+            worker("w2.1", route="main", status="planned", writes=["README.md"], out=".agents/work/runs/w2.1-r1/"),
+        )
+        self.assertEqual(self.errors(path), [])
+        self.assertEqual(len(self.errors(path, dispatch="w2.1")), 1)
+
     def test_duplicate_ids_are_reported(self):
-        path = self.state(worker("w1"), worker("w1", out="harness/runs/w1-r2/"))
+        path = self.state(worker("w1"), worker("w1", out=".agents/work/runs/w1-r2/"))
         self.assertTrue(any("duplicate id" in e for e in self.errors(path)))
 
     def test_advisor_cannot_write(self):
@@ -170,7 +179,7 @@ class AliveTests(StateCase):
 
     def test_finished_process_is_listed_for_collection(self):
         path = self.state(worker("w1", status="running", pid=dead_pid(), log="a.log"))
-        out = path.parent.parent / "harness" / "runs" / "w1-r1"
+        out = path.parents[2] / ".agents" / "work" / "runs" / "w1-r1"
         out.mkdir(parents=True)
         (out / "exit-status").write_text("0\n", encoding="utf-8")
         problems = self.problems(path, alive=True)
@@ -178,8 +187,8 @@ class AliveTests(StateCase):
         self.assertTrue(any(p.startswith("NOTE w1") and "exit status 0" in p for p in problems), problems)
 
     def test_finished_advisor_reads_exit_status_from_its_run_directory(self):
-        path = self.state(worker("a1", route="advisor", status="running", pid=dead_pid(), log="harness/runs/a1/stdout.log",
-                                 worktree=None, out="harness/runs/a1/"))
+        path = self.state(worker("a1", route="advisor", status="running", pid=dead_pid(), log=".agents/work/runs/a1/stdout.log",
+                                 worktree=None, out=".agents/work/runs/a1/"))
         out = path.parent / "runs" / "a1"
         out.mkdir(parents=True)
         (out / "exit-status").write_text("0\n", encoding="utf-8")
@@ -199,11 +208,73 @@ class AliveTests(StateCase):
         self.assertTrue(any(p.startswith("NOTE p1") for p in problems), problems)
 
 
+class ResourceTests(StateCase):
+    def test_two_holders_of_one_resource_is_an_error(self):
+        path = self.state(
+            worker("p1", route="paid-run", status="running", pid=1, log="a.log", worktree=None,
+                   resources=["gpu-host/port:6379"]),
+            worker("p2", route="paid-run", status="review", worktree=None, resources=["gpu-host/port:6379"]),
+        )
+        errors = self.errors(path)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("both hold gpu-host/port:6379", errors[0])
+
+    def test_planned_resource_overlap_warns_and_dispatch_errors(self):
+        path = self.state(
+            worker("p1", route="paid-run", status="running", pid=1, log="a.log", worktree=None,
+                   resources=["gpu-host/gpus"]),
+            worker("p2", route="paid-run", worktree=None, resources=["gpu-host/gpus", "gpu-host/port:8265"]),
+        )
+        self.assertTrue(self.problems(path)[0].startswith("WARN"))
+        self.assertEqual(len(self.errors(path, dispatch="p2")), 1)
+
+    def test_different_resources_do_not_conflict(self):
+        path = self.state(
+            worker("p1", route="paid-run", status="running", pid=1, log="a.log", worktree=None,
+                   resources=["gpu-host/port:6379"]),
+            worker("p2", route="paid-run", status="running", pid=2, log="b.log", worktree=None,
+                   resources=["gpu-host/port:6380"]),
+        )
+        self.assertEqual(self.problems(path), [])
+
+
+class ContextTests(StateCase):
+    def test_lists_nested_instruction_files_for_the_write_set(self):
+        path = self.state(worker("w1", writes=["src/pkg/a.py", "tools/"]))
+        root = path.parents[2]
+        for folder in ("", "src", "src/pkg", "tools", "tools/deep", "other"):
+            (root / folder).mkdir(parents=True, exist_ok=True)
+            (root / folder / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+        workers, _ = work_state.run(path)
+        found = work_state.context(workers["w1"], work_state.repo_root(path))
+        self.assertEqual(found, ["src/AGENTS.md", "src/pkg/AGENTS.md", "tools/AGENTS.md", "tools/deep/AGENTS.md"])
+
+    def test_example_worker_gets_the_package_rules(self):
+        workers, _ = work_state.run(EXAMPLE)
+        self.assertEqual(work_state.context(workers["w12"], work_state.repo_root(EXAMPLE)), ["src/evalkit/AGENTS.md"])
+
+
+class BearingsTests(StateCase):
+    def test_bearings_prints_workers_and_ledger_tail(self):
+        path = self.state(worker("w1", status="running", pid=dead_pid(), log="a.log"))
+        (path.parent / "ledger.md").write_text("# Ledger\n\n2026-10-15 w1 Dispatch: effort high.\n", encoding="utf-8")
+        text = work_state.bearings(path)
+        self.assertIn("| w1 | codex | running |", text)
+        self.assertIn("died without finishing", text)
+        self.assertIn("2026-10-15 w1 Dispatch", text)
+
+    def test_bearings_without_a_state_file_prints_nothing_and_exits_0(self):
+        missing = Path(tempfile.mkdtemp()) / ".agents" / "work" / "state.json"
+        result = subprocess.run([sys.executable, str(ROOT / "scripts" / "work_state.py"), str(missing), "--bearings"],
+                                capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stdout), (0, ""))
+
+
 class CommandLineTests(unittest.TestCase):
     def test_invalid_json_exits_with_status_1(self):
         tmp = Path(tempfile.mkdtemp()) / "state.json"
         tmp.write_text("{not json", encoding="utf-8")
-        result = subprocess.run([sys.executable, str(ROOT / "scripts" / "harness_state.py"), str(tmp)],
+        result = subprocess.run([sys.executable, str(ROOT / "scripts" / "work_state.py"), str(tmp)],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
 

@@ -49,9 +49,24 @@ When two planned briefs need the same file, merge them into one brief with the u
 
 Do not escalate by switching the code writer to a Claude subagent. A failed Codex run is reported and its brief repaired.
 
+## Routes for the repository layer
+
+| Work | Route |
+| --- | --- |
+| Adopting the layout in a project | Main session plans from [adopt](adopt.md) and asks the user; a large merge of existing rules goes to Codex as a brief |
+| A decision note | Main session, at close-out; a reporter subagent may draft it into its own output |
+| Documentation that changes with code | Inside the code brief's write set, written by Codex |
+| A shared document outside the worker's write set | The close-out worker of that lineage |
+| An audit of documents against code | Read-only search subagent that returns mismatches with evidence; fixes go to Codex |
+| A cleanup of session residue in code or documents | Codex, as a brief listing the files; the reviewer applies [prose](prose.md) |
+| A change to `.agents/checks.json`, hooks or CI | Codex with effort `xhigh`, because it changes what every later round counts as evidence |
+
+The built-in Explore and Plan agents start without AGENTS.md. A search runbook that depends on a project rule names the rule or the file.
+
 ## Routes that look right and are not
 
 - A subagent that monitors another subagent. Subagents do not start or supervise agents. Waits belong to the main session or to one watcher.
 - A reviewer that also fixes. A fix becomes the next Codex round, so the change keeps a single writer.
 - Parallel Codex runs on one worktree. Each writer gets its own worktree, even when the write sets are disjoint.
 - The advisor asked to choose between two implementations that a test could separate. Write the test instead.
+- A shared document edited by each worker in its own write set. Two edits of the same section conflict at the merge, or one silently replaces the other when a tool rewrites whole blocks. The close-outs edit it one after the other.

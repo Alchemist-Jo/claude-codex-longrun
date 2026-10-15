@@ -1,0 +1,32 @@
+# Copy to .github/workflows/checks.yml, or add the last two steps to an
+# existing workflow. It checks and tests; it never deploys or publishes.
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Add the steps that install the project and its test dependencies here.
+      - name: Run every check
+        run: python3 .agents/bin/run_checks.py --mode ci
+      - name: Archived notes are only added
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # A force push leaves "before" outside the history; skip the comparison then.
+          if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            python3 .agents/bin/repo_check.py --only archive --base "$BASE"
+          fi

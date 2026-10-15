@@ -18,18 +18,21 @@ Add the worktree root as a working directory with `/add-dir ../wt` or the `--add
 {
   "permissions": {
     "allow": [
-      "Bash(/home/me/.claude/skills/claude-codex-longrun/scripts/wait.sh *)",
-      "Bash(ssh gpu-host /work/proj/harness/bin/wait.sh *)",
+      "Bash(.agents/bin/wait.sh *)",
+      "Bash(python3 .agents/bin/work_state.py *)",
+      "Bash(python3 .agents/bin/run_checks.py *)",
+      "Bash(python3 .agents/bin/repo_check.py *)",
+      "Bash(/abs/repo/.agents/bin/detach.sh /abs/repo/.agents/work/runs/*/collection -- python3 /abs/repo/.agents/bin/collect_round.py *)",
+      "Bash(/abs/repo/.agents/bin/wait.sh *)",
+      "Bash(ssh gpu-host /work/proj/.agents/bin/wait.sh *)",
       "Bash(ssh gpu-host cat *)",
       "Bash(ssh gpu-host tail *)",
       "Bash(ssh gpu-host nvidia-smi *)",
       "Bash(git worktree add *)",
-      "Bash(git add *)",
-      "Bash(git commit --no-verify -m *)",
       "Bash(git tag freeze/*)",
-      "Edit(harness/runs/**)",
-      "Edit(harness/reviews/**)",
-      "Edit(harness/reports/**)"
+      "Edit(.agents/work/runs/**)",
+      "Edit(.agents/work/reviews/**)",
+      "Edit(.agents/work/reports/**)"
     ],
     "ask": [
       "Bash(ssh gpu-host kill *)",
@@ -45,7 +48,7 @@ Add the worktree root as a working directory with `/add-dir ../wt` or the `--add
 }
 ~~~
 
-`wait.sh` only observes, so allowing it costs nothing. The `git` rules cover the pipeline's collection and freeze, which run from inside the worktree after a separate `cd`. The `Edit` rules cover the output files subagents write by redirection. A step that still prompts on the first run shows the exact form to add.
+`wait.sh`, `work_state.py` and `repo_check.py` only read, and `run_checks.py` and `collect_round.py` run the checks the project already declared, so allowing them costs little. Subagents use absolute paths, because their working directory is reset between commands; write the rules with the real repository path in place of `/abs/repo`. The `git` rules cover the worktree preparation and the freeze tag. The `Edit` rules cover the output files subagents write by redirection. A step that still prompts on the first run shows the exact form to add.
 
 Rules are evaluated deny first, then ask, then allow, so an ask rule prompts even when a broader allow rule also matches. A trailing ` *` matches the bare command too. Compound commands are split at `&&`, `||`, `;` and `|`, and each part must match on its own. Allow rules in a project's `.claude/settings.json` apply only after the workspace trust dialog has been accepted.
 

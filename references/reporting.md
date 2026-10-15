@@ -4,7 +4,7 @@ Read before reporting progress or results to the user.
 
 ## Facts sheet
 
-The main session writes `harness/reports/<date>-<topic>/facts.md` before any drafting:
+The main session writes `.agents/work/reports/<date>-<topic>/facts.md` before any drafting:
 
 | Fact | Value | Source |
 | --- | --- | --- |

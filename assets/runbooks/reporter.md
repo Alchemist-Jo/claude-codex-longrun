@@ -4,7 +4,7 @@ Role: write two versions of one report from a facts sheet, and list every number
 
 ## Inputs
 
-- Facts sheet: `/abs/path/harness/reports/<date>-<topic>/facts.md`
+- Facts sheet: `/abs/path/.agents/work/reports/<date>-<topic>/facts.md`
 - Reader of the plain version: <who>
 - Language: <language>
 - Limits: precise <n> words or characters, plain <n>

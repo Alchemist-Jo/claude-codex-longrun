@@ -1,0 +1,20 @@
+{
+  "checks": [
+    {
+      "id": "repo",
+      "command": ["python3", ".agents/bin/repo_check.py"],
+      "modes": ["commit", "ci"]
+    },
+    {
+      "id": "state",
+      "command": ["python3", ".agents/bin/work_state.py", ".agents/work/state.json"],
+      "modes": ["commit"]
+    },
+    {
+      "id": "tests",
+      "command": ["python3", "-m", "pytest", "-q"],
+      "modes": ["test", "ci"],
+      "timeout": 1800
+    }
+  ]
+}

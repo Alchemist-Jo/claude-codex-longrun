@@ -5,15 +5,16 @@
       "id": "w01",
       "route": "codex",
       "status": "planned",
-      "brief": "harness/briefs/w01.md",
+      "brief": ".agents/work/briefs/w01.md",
       "writes": [
         "src/module.py",
         "tests/test_module.py"
       ],
+      "resources": [],
       "base": "main@0000000",
       "worktree": "../wt/w01",
       "host": "local",
-      "out": "harness/runs/w01-r1/",
+      "out": ".agents/work/runs/w01-r1/",
       "session": "",
       "round": 1
     }

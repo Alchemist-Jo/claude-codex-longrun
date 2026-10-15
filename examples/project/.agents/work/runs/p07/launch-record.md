@@ -4,9 +4,10 @@ Written by the main session in the run directory before the launch. The watcher 
 
 | Field | Value |
 | --- | --- |
-| Command | `ssh gpu-host 'cd /work/evalkit && harness/bin/detach.sh harness/runs/p07 -- python train.py --config configs/base.yaml'` |
+| Command | `ssh gpu-host 'cd /work/evalkit && .agents/bin/detach.sh .agents/work/runs/p07 -- python train.py --config configs/base.yaml'` |
 | Starts from | tag `freeze/w11` at `9b04d2e` |
 | Host | `gpu-host` |
+| Ports and devices | `gpu-host/gpus`, `gpu-host/port:6379` |
 | Expected duration | 6 hours |
 | Expected cost | about 24 GPU hours |
 | Kill condition | a NaN loss in stdout.log, or no new log line for 20 minutes |
