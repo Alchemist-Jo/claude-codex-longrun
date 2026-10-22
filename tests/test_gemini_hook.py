@@ -9,6 +9,7 @@ import sys
 import tempfile
 from typing import Any
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -29,7 +30,7 @@ class HookTests(unittest.TestCase):
         self.run.mkdir()
         self.policy: dict[str, Any] = {"root": str(self.root), "read": [str(self.extra)],
                                       "write": ["guide.md", "docs/"],
-                                      "commands": ["cat", "rg", "find", "git diff"], "web": False}
+                                      "commands": ["cat", "rg", "grep", "find", "git diff", "git show", "git grep"], "web": False}
         self.path = self.run / "policy.json"
         self.path.write_text(json.dumps(self.policy), encoding="utf-8")
 
@@ -63,11 +64,18 @@ class HookTests(unittest.TestCase):
     def test_read_missing_path(self) -> None:
         self.assertEqual(self.decision("read_file"), "deny")
 
-    def test_environment_paths_are_denied_for_every_tool(self) -> None:
-        for tool in ("read_file", "write_file", "edit_file", "search_web", "manage_task"):
+    def test_environment_paths_are_denied_for_file_tools(self) -> None:
+        for tool in ("read_file", "write_file", "edit_file"):
             for path in (".env", "docs/.env.local"):
                 with self.subTest(tool=tool, path=path):
                     self.assertEqual(self.decision(tool, Path=path), "deny")
+
+    def test_free_text_can_mention_environment_files(self) -> None:
+        self.assertEqual(self.decision("write_file", Path="guide.md", Content="See .env.example"), "allow")
+        self.assertEqual(self.decision("edit_file", Path="guide.md", Target=".env", Replacement=".env.example"), "allow")
+        self.policy["web"] = True
+        self.assertEqual(self.decision("search_web", query=".env.example"), "allow")
+        self.assertEqual(self.decision("manage_task", Action="list", Input=".env"), "allow")
 
     def test_environment_command_arguments(self) -> None:
         for cmd in ("cat .env", f"cat {self.root}/.env.production", 'cat "docs/.env.local"'):
@@ -136,11 +144,95 @@ class HookTests(unittest.TestCase):
             self.assertEqual(self.decision("run_command", CommandLine=f"rg {arg} text"), "deny")
 
     def test_absolute_argument_roots(self) -> None:
+        (self.base / "outside").touch()
         self.assertEqual(self.decision("run_command", CommandLine=f"cat {self.extra}/a"), "allow")
         self.assertEqual(self.decision("run_command", CommandLine=f"cat {self.base}/outside"), "deny")
 
     def test_home_argument_outside_roots(self) -> None:
-        self.assertEqual(self.decision("run_command", CommandLine="cat ~/outside"), "deny")
+        outside = self.base / "outside"
+        outside.touch()
+        with patch.object(gemini_hook.os.path, "expanduser", return_value=str(outside)):
+            self.assertEqual(self.decision("run_command", CommandLine="cat ~/outside"), "deny")
+
+    def test_quote_aware_command_syntax(self) -> None:
+        allowed = ("rg -F '|' docs/guide.md", "rg 'a;b' docs", "rg '/no/such/path' docs",
+                   "rg '$HOME `id` \\ {} * ? [ ]' docs", 'rg "a;b|c" docs')
+        denied = ("find . -ex$UNSET\"ec\" sh -c id sh {} +", "rg $HOME docs", 'rg "$HOME" docs',
+                  'rg "`id`" docs', 'rg "a\\b" docs', "rg a\\b docs", "rg {a,b} docs",
+                  "rg * docs", "rg a? docs", "rg [ab] docs", "rg foo\rbar", "rg 'unclosed", 'rg "unclosed')
+        for cmd in allowed:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decision("run_command", CommandLine=cmd), "allow")
+        for cmd in denied:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decision("run_command", CommandLine=cmd), "deny")
+
+    def test_find_denied_options_name_the_option(self) -> None:
+        for option in ("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls",
+                       "-L", "-follow", "-exec=x", "-HL"):
+            with self.subTest(option=option):
+                decision, reason = gemini_hook.decide(self.event("run_command", CommandLine=f"find . {option} x"), self.policy)
+                self.assertEqual(decision, "deny")
+                self.assertIn(option, reason)
+                self.assertIn("find -name", reason)
+
+    def test_rg_denied_options_and_default_search(self) -> None:
+        for option in ("--pre=tool", "--pre-glob='*.py'", "--hostname-bin=sh", "--hostname-bin", "--hidden",
+                       "--hidden=true", "--no-ignore", "--no-ignore-vcs", "--follow", "--follow=true", "-L", "-nL",
+                       "-uu", "-n."):
+            with self.subTest(option=option):
+                decision, reason = gemini_hook.decide(self.event("run_command", CommandLine=f"rg {option} x docs"), self.policy)
+                self.assertEqual(decision, "deny")
+                self.assertIn("Option", reason)
+                self.assertIn("use rg", reason)
+        self.assertEqual(self.decision("run_command", CommandLine="rg -n -F x docs"), "allow")
+
+    def test_grep_denied_options_and_nonrecursive_search(self) -> None:
+        for option in ("--recursive", "--recursive=true", "--dereference-recursive", "--directories=recurse",
+                       "--directories recurse", "-d recurse", "-drecurse", "-r", "-rn", "-R -S", "-nO"):
+            with self.subTest(option=option):
+                decision, reason = gemini_hook.decide(self.event("run_command", CommandLine=f"grep {option} x docs"), self.policy)
+                self.assertEqual(decision, "deny")
+                self.assertIn("Option", reason)
+                self.assertIn("use rg for recursive search", reason)
+        for cmd in ("grep -n x README.md", "grep --directories=skip x docs", "grep -d skip x docs"):
+            self.assertEqual(self.decision("run_command", CommandLine=cmd), "allow")
+
+    def test_git_denied_options_and_internal_search(self) -> None:
+        for cmd in ("git grep --open-files-in-pager='sh -c id' -- .", "git grep -Ox foo",
+                    "git diff --ext-diff", "git diff --ext-diff=true", "git diff --output=out", "git diff --output out",
+                    "git diff --no-index a b", "git diff --untracked", "git diff --untracked=all"):
+            with self.subTest(cmd=cmd):
+                decision, reason = gemini_hook.decide(self.event("run_command", CommandLine=cmd), self.policy)
+                self.assertEqual(decision, "deny")
+                self.assertIn("Option", reason)
+                self.assertIn("use git", reason)
+        self.assertEqual(self.decision("run_command", CommandLine="git grep -n foo -- docs"), "allow")
+
+    def test_command_paths_in_option_values_and_relative_paths(self) -> None:
+        outside = self.base / "outside"
+        outside.mkdir()
+        path = outside / "p"
+        path.touch()
+        (self.root / "link").symlink_to(path)
+        for cmd in (f"grep --file={path} README.md", f"grep -f{path} README.md", "cat ../outside/p", "cat link"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decision("run_command", CommandLine=cmd), "deny")
+        for cmd in ("grep --file=guide.md README.md", "grep -fguide.md README.md", "rg '/no/such/path' docs"):
+            self.assertEqual(self.decision("run_command", CommandLine=cmd), "allow")
+
+    def test_environment_command_paths_in_revisions_and_options(self) -> None:
+        (self.root / "alias").symlink_to(self.root / ".env")
+        for cmd in ("cat alias", "git show HEAD:.env", "grep --file=.env.local guide.md", "grep -f.env guide.md"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decision("run_command", CommandLine=cmd), "deny")
+        self.assertEqual(self.decision("run_command", CommandLine="git show HEAD:guide.md"), "allow")
+
+    def test_command_paths_resolve_against_cwd(self) -> None:
+        (self.base / "outside").touch()
+        self.assertEqual(self.decision("run_command", CommandLine="cat ../outside", Cwd=str(self.extra)), "deny")
+        self.assertEqual(self.decision("run_command", CommandLine="cat missing", Cwd=str(self.extra)), "allow")
+        self.assertEqual(self.decision("run_command", CommandLine="git diff", Cwd=str(self.root / ".env.local")), "deny")
 
     def test_command_cwd(self) -> None:
         self.assertEqual(self.decision("run_command", CommandLine="git diff", Cwd=str(self.extra)), "allow")
@@ -194,12 +286,20 @@ class HookTests(unittest.TestCase):
 
     def test_start_marker_and_neutral_output(self) -> None:
         for _ in range(2):
-            result = self.invoke({"conversationId": "session-123"}, mode="start")
+            result = self.invoke({"conversationId": "session-123", "invocationNum": 2}, mode="start")
             self.assertEqual((result.returncode, result.stdout), (0, ""))
         entries = [json.loads(line) for line in (self.run / "hook-started").read_text().splitlines()]
         self.assertEqual(len(entries), 2)
         self.assertEqual(entries[0]["conversation_id"], "session-123")
+        self.assertEqual(entries[0]["invocationNum"], 2)
         self.assertTrue(entries[0]["time"])
+
+    def test_audit_error_denies_and_writes_marker(self) -> None:
+        (self.run / "tools.jsonl").mkdir()
+        result = self.invoke(self.event("read_file", Path="guide.md"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["decision"], "deny")
+        self.assertIn("Policy audit failed", (self.run / "hook-error").read_text())
 
     def test_one_audit_line_per_tool_with_shortened_strings(self) -> None:
         for content in ("a" * 401, "a" * 400):

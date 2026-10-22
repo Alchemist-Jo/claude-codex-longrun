@@ -5,25 +5,28 @@
         --prompt-file FILE -- AGY [ARG...]
     gemini_run.py --preflight --run RUN --root DIR -- AGY [ARG...]
 
-RUN must exist and have no policy.json. DIR and read roots are absolute
-directories; write entries are relative files or directories ending with /.
-The project must install gemini_hook.py and enable its SessionStart and
+RUN must exist without artifacts from a worker run. DIR and read roots are
+absolute directories; write entries are relative files or directories ending
+with /.
+The project must install gemini_hook.py and enable its PreInvocation and
 PreToolUse commands in DIR/.agents/hooks.json.
 
 Steps: validate the hooks and fresh preflight record, write policy.json,
 launch AGY in its own process group with closed stdin and read-only shell
-sandboxing, then check hook-started, process status, result.json, tool
+sandboxing, then check hook-started, hook-error, process status, result.json, tool
 denials and the final response. Logs and session data stay in RUN. Preflight
 runs six probes in new subdirectories and records their results beside runs/.
 
-Exit statuses: 0 success, 1 failed or timed out, 2 invalid launch inputs or
+Exit statuses: 0 success, 1 failed, interrupted or timed out, 2 invalid launch inputs or
 missing/stale preflight, 3 blocked by a tool denial. A judged run prints one
 gemini_run: VERDICT reason line; invalid inputs print one reason to stderr.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 from datetime import datetime, timezone
+import io
 import json
 import math
 import os
@@ -33,6 +36,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from types import FrameType
 from typing import Any
 
 DEFAULT_COMMANDS = ["ls", "cat", "head", "tail", "wc", "pwd", "rg", "grep", "find",
@@ -71,20 +75,24 @@ def check_hooks(root: Path) -> None:
         for named in hooks.values():
             if not isinstance(named, dict) or named.get("enabled") is not True:
                 continue
-            starts = named.get("SessionStart", [])
+            starts = named.get("PreInvocation", [])
             tools = named.get("PreToolUse", [])
-            if (any("gemini_hook.py" in entry.get("command", "") for entry in starts)
-                    and any("gemini_hook.py" in hook.get("command", "")
-                            for entry in tools for hook in entry.get("hooks", []))):
+            if (any(entry.get("type", "command") == "command"
+                    and entry.get("command", "").endswith("gemini_hook.py start") for entry in starts)
+                    and any(entry.get("matcher", "") in {".*", "*", ""}
+                            and any(hook.get("type", "command") == "command"
+                                    and hook.get("command", "").endswith("gemini_hook.py tool")
+                                    for hook in entry.get("hooks", [])) for entry in tools)):
                 return
-    raise ValueError(f"{path} must enable gemini_hook.py for SessionStart and PreToolUse")
+    raise ValueError(f"{path} must enable gemini_hook.py start for PreInvocation and gemini_hook.py tool for all PreToolUse calls")
 
 
 def validate(args: argparse.Namespace, require_fresh: bool) -> None:
     if not args.run.is_dir():
         raise ValueError(f"run directory does not exist: {args.run}")
-    if (args.run / "policy.json").exists():
-        raise ValueError(f"run directory already holds policy.json: {args.run}")
+    for name in ("policy.json", "hook-started", "hook-error", "tools.jsonl", "result.json", "session", "last-message.md"):
+        if os.path.lexists(args.run / name):
+            raise ValueError(f"run directory already holds {name}: {args.run}")
     for label, path in [("root", args.root), *(("read", path) for path in args.read)]:
         if not path.is_absolute() or not path.is_dir():
             raise ValueError(f"{label} must be an existing absolute directory: {path}")
@@ -112,6 +120,10 @@ def prompt_text(policy: dict[str, Any], prompt: str) -> str:
         + (f"Write set: {json.dumps(policy['write'])}.\n" if policy["write"] else "Nothing may be written.\n")
         + f"Allowed command prefixes: {json.dumps(policy['commands'])}.\n"
         + f"Web search is {'allowed' if policy['web'] else 'disabled'}. Shell commands are read-only.\n"
+        + "Shell commands can read only inside the working directory because the sandbox blocks the rest; "
+          "read files in the other read roots with the file tool.\n"
+        + "A command is one allowed program with quoted arguments, without pipes, redirection, variables, "
+          "command substitution, braces or unquoted glob characters; use rg for recursive search.\n"
         + "A call outside this policy is denied and ends the run as blocked; if the task needs more, "
           "stop and say what is needed in your final message.\n\n" + prompt
     )
@@ -154,6 +166,8 @@ def judge(run: Path, returncode: int, killed: bool) -> int:
         (run / "session").write_text(str(session), encoding="utf-8")
     if not (run / "hook-started").is_file():
         return verdict(1, "the policy hook did not run (hook-started is missing)")
+    if (run / "hook-error").exists():
+        return verdict(1, "the policy hook could not record its audit; see hook-error")
     stderr = (run / "agy-stderr.log").read_text(encoding="utf-8", errors="replace")
     if killed or "print timeout after" in stderr:
         return verdict(1, "agy timed out")
@@ -190,37 +204,62 @@ def execute(args: argparse.Namespace, prompt: str | None = None, require_fresh: 
         policy_path = args.run / "policy.json"
         with policy_path.open("x", encoding="utf-8") as output:
             json.dump(policy, output, indent=2)
+        (args.run / "tools.jsonl").touch(exist_ok=False)
     except (OSError, ValueError) as error:
         print(f"gemini_run: {one_line(error)}", file=sys.stderr)
         return 2
     command = [*args.agy, "--output-format", "json", "--print-timeout", f"{args.timeout:g}s",
                "--log-file", str(args.run / "agy.log"), "--sandbox", "--dangerously-skip-permissions",
                "--disable-slash-commands"]
-    for path in args.read:
-        command.extend(["--add-dir", str(path)])
     if args.conversation:
         command.extend(["--conversation", args.conversation])
     command.extend(["-p", prompt_text(policy, prompt)])
     env = dict(os.environ, LONGRUN_GEMINI_POLICY=str(policy_path))
     killed = False
+    process: subprocess.Popen[bytes] | None = None
+    interrupted: int | None = None
+    signals = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+    previous = {signum: signal.getsignal(signum) for signum in signals}
+
+    def interrupt(signum: int, frame: FrameType | None) -> None:
+        nonlocal interrupted
+        interrupted = signum
+        if process is not None:
+            for watched in signals:
+                signal.signal(watched, signal.SIG_IGN)
+            terminate_group(process)
+            raise InterruptedError(signum, f"interrupted by signal {signum}")
+
     try:
+        for signum in signals:
+            signal.signal(signum, interrupt)
         with open(args.run / "result.json", "wb") as stdout, open(args.run / "agy-stderr.log", "wb") as stderr:
             process = subprocess.Popen(command, cwd=args.root, stdin=subprocess.DEVNULL,
                                        stdout=stdout, stderr=stderr, env=env, start_new_session=True)
+            if interrupted is not None:
+                interrupt(interrupted, None)
             try:
                 returncode = process.wait(timeout=args.timeout + 300)
             except subprocess.TimeoutExpired:
                 killed = True
                 terminate_group(process)
-                returncode = process.returncode
+                returncode = process.wait()
         return judge(args.run, returncode, killed)
+    except InterruptedError:
+        raise
     except (OSError, ValueError, TypeError) as error:
         return verdict(1, f"agy run failed: {one_line(error)}")
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 def preflight(args: argparse.Namespace) -> int:
     try:
         validate(args, require_fresh=False)
+        record_path = args.run.parent.parent / "gemini-preflight.json"
+        if record_path.is_dir() or not record_path.parent.is_dir():
+            raise ValueError(f"preflight record must be a file in an existing directory: {record_path}")
         binary = shutil.which("agy")
         if not binary:
             raise ValueError("agy is not on PATH")
@@ -241,32 +280,50 @@ def preflight(args: argparse.Namespace) -> int:
         ("reply", "Reply with the single word READY.", 0, "READY"),
         ("read", "Read AGENTS.md in the working directory with your file tool and reply with its first line only.", 0, first_line),
         ("command", "Run `git rev-parse HEAD` and reply with its output only.", 0, head[:7]),
-        ("deny-command", "Run the shell command `touch longrun-preflight-probe` and report the result.", 3, ""),
-        ("deny-write", "Create the file longrun-preflight-probe.md containing x with your file tool, and report the result.", 3, ""),
+        ("deny-command", "This run tests that the policy hook denies a command. Call run_command with exactly "
+         "`touch longrun-preflight-probe`; the call is expected to be denied. Then reply with the denial reason you received.", 3, ""),
+        ("deny-write", "This run tests that the policy hook denies a write. Call write_file to create "
+         "longrun-preflight-probe.md containing x; the call is expected to be denied. Then reply with the denial reason you received.", 3, ""),
         ("search", "Search the web for the Python documentation page of the json module and reply with its URL only.", 0, "docs.python.org"),
     ]
     results: dict[str, dict[str, Any]] = {}
     for name, prompt, expected_exit, expected_text in probes:
         probe = argparse.Namespace(**vars(args))
         probe.run = args.run / name
-        probe.run.mkdir()
+        try:
+            probe.run.mkdir()
+        except OSError as error:
+            print(f"gemini_run: preflight setup failed: {one_line(error)}", file=sys.stderr)
+            return 2
         probe.read, probe.write, probe.command = [], [], []
         probe.web, probe.timeout, probe.conversation = name == "search", 300, None
-        status = execute(probe, prompt, require_fresh=False)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            status = execute(probe, prompt, require_fresh=False)
         message = probe.run / "last-message.md"
-        response = message.read_text(encoding="utf-8") if message.is_file() else ""
+        try:
+            response = message.read_text(encoding="utf-8") if message.is_file() else ""
+            tools = [json.loads(line) for line in (probe.run / "tools.jsonl").read_text(encoding="utf-8").splitlines()]
+        except (OSError, ValueError) as error:
+            print(f"gemini_run: preflight artifacts unavailable: {one_line(error)}", file=sys.stderr)
+            return 2
         passed = status == expected_exit and expected_text in response
         if name == "deny-command":
-            passed = passed and not (args.root / "longrun-preflight-probe").exists()
+            passed = (passed and any(tool.get("decision") == "deny" and tool.get("tool") == "run_command" for tool in tools)
+                      and not (args.root / "longrun-preflight-probe").exists())
         if name == "deny-write":
-            passed = passed and not (args.root / "longrun-preflight-probe.md").exists()
-        detail = f"exit {status}, expected {expected_exit}; response {response!r}"
+            passed = (passed and any(tool.get("decision") == "deny" and tool.get("tool") in {"write_file", "edit_file"}
+                                     for tool in tools) and not (args.root / "longrun-preflight-probe.md").exists())
+        detail = f"exit {status}, expected {expected_exit}; {output.getvalue().strip()}; response {response!r}"
         results[name] = {"exit": status, "passed": passed, "detail": detail}
         print(f"gemini_run: preflight {name} {'PASS' if passed else 'FAIL'} {one_line(detail)}")
     passed = all(probe["passed"] for probe in results.values())
     record = {"time": datetime.now(timezone.utc).isoformat(), "agy": str(actual), "agy_mtime": mtime,
               "command": args.agy, "probes": results, "passed": passed}
-    (args.run.parent.parent / "gemini-preflight.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    try:
+        record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    except OSError as error:
+        print(f"gemini_run: cannot write preflight record: {one_line(error)}", file=sys.stderr)
+        return 2
     return 0 if passed else 1
 
 
@@ -287,7 +344,10 @@ def main() -> int:
     if args.agy[:1] == ["--"]:
         args.agy = args.agy[1:]
     args.run = args.run.resolve()
-    return preflight(args) if args.preflight else execute(args)
+    try:
+        return preflight(args) if args.preflight else execute(args)
+    except InterruptedError as error:
+        return verdict(1, f"interrupted by signal {error.errno}")
 
 
 if __name__ == "__main__":

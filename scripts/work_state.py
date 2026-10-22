@@ -1,9 +1,9 @@
 """Check the work state file and print the bearings for a new session.
 
 The state file (default .agents/work/state.json) lists every worker the main
-session has dispatched: Codex and Gemini runs, subagents, advisor questions and paid
-runs. Only the main session writes it. This script reports, without changing
-anything:
+session has dispatched: Codex and Gemini runs, subagents, advisor questions
+and paid runs. Only the main session writes it. This script reports, without
+changing anything:
 
 - workers whose write sets or resources overlap while both hold them
 - running processes without a log or a pid
@@ -15,8 +15,8 @@ anything:
 With --dispatch ID the named worker is treated as holding its write set and
 resources, so the check answers whether it can start now. Gemini dispatch
 also requires a passing preflight record matching the agy binary on PATH.
-Codex and Gemini workers that write require their own worktrees. With --context ID
-the script lists the AGENTS.md files below the repository root that apply to
+Codex and Gemini workers that write require their own worktrees. With
+--context ID the script lists the AGENTS.md files below the root that apply to
 the worker's write set; Codex started at the worktree root does not load
 them, so the brief names them. With --summary the script prints the worker
 table first. With --bearings it prints git status, the worker table, the

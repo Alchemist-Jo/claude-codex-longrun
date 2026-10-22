@@ -90,12 +90,12 @@ class CollectTests(CollectCase):
         self.assertEqual(self.read("round-commit").strip(), self.base)
         self.assertEqual(self.read("fix.patch"), "")
 
-    def test_a_commit_by_codex_stops_the_collection(self):
+    def test_a_commit_by_the_worker_stops_the_collection(self):
         (self.wt / "src" / "a.py").write_text("def run():\n    return 2\n")
         self.git(self.wt, "commit", "-qam", "codex committed")
         result = self.collect()
         self.assertEqual(result.returncode, 2)
-        self.assertIn("Codex committed", result.stderr)
+        self.assertIn("the worker committed", result.stderr)
         self.assertFalse((self.run_dir / "round-commit").exists())
 
     def test_unfinished_job_stops_the_collection(self):

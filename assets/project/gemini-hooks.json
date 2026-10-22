@@ -1,7 +1,7 @@
 {
   "longrun-gemini-policy": {
     "enabled": true,
-    "SessionStart": [{"type": "command", "command": "python3 bin/gemini_hook.py start", "timeout": 30}],
+    "PreInvocation": [{"type": "command", "command": "python3 bin/gemini_hook.py start", "timeout": 30}],
     "PreToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": "python3 bin/gemini_hook.py tool", "timeout": 30}]}]
   }
 }
