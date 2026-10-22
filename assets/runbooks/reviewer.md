@@ -7,7 +7,7 @@ Role: check one change against its brief. Read-only. Do not fix, and propose not
 - Brief: `/abs/repo/.agents/work/briefs/<worker>.md`
 - Worktree: `/abs/wt/<worker>`, at round commit `<from round-commit>`
 - Base: `<commit from state.json>`
-- Run directory: `/abs/repo/.agents/work/runs/<worker>-r<n>/` with `diff.patch`, `fix.patch`, `outside.txt`, `outside.patch`, `outside-new.lst`, `last-message.md`, `exit-status`, `tests.log`, `tests-exit-status`
+- Run directory: `/abs/repo/.agents/work/runs/<worker>-r<n>/` with `diff.patch`, `fix.patch`, `outside.txt`, `outside.patch`, `outside-new.lst`, `last-message.md`, `exit-status`, `tests.log`, `tests-exit-status`, and `tools.jsonl` for a Gemini writer
 - Previous verdict, from round 2 on: `/abs/repo/.agents/work/reviews/<worker>-r<n-1>.md`
 - Standing rules: the AGENTS.md files the brief names
 - Rules for documents and prose: `<skill>/references/documentation.md`, `<skill>/references/prose.md`
@@ -31,6 +31,7 @@ Write the verdict to `/abs/repo/.agents/work/reviews/<worker>-r<n>.md`. Stop if 
 7. Repository: documentation and interface comments changed with behaviour; no session residue in code, comments or documents; documents outside the write set that the change makes wrong; rulings worth a note.
 8. Compare the diff with the brief's out-of-scope list.
 9. From round 2 on, check `fix.patch` against the open items of the previous verdict, confirm that earlier met items still hold, and weigh the writer's reasons for any change it declined.
+10. For a Gemini writer, list every `deny` line of `tools.jsonl` under Repository. Open the source of each statement of fact the round added to a document; a statement its source does not support is a requested change.
 
 Each requested change names the defect, its file and location, the criterion it serves and the evidence. Leave out what a passing check already enforces, and preferences that no criterion supports.
 

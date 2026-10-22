@@ -1,25 +1,26 @@
 ---
-name: claude-codex-longrun
-description: Runs a long software or research project through the main Claude session, Claude subagents and Codex CLI, and keeps the repository in a state the next session can trust. Gives a routing table, briefs and runbooks with stop conditions, one writer per file and per resource, detached jobs, state in files, round commits checked as committed, capped review, close-out, paid runs, kills and checked reports; plus a .agents/ layout, short layered AGENTS.md, decision notes, docs synced with code, session-residue cleanup and one check list shared by hooks and CI. Use to split work between Claude and Codex, run agents in parallel, wait on long jobs, recover after compaction, review delegated code, or set up and maintain a repository for agent work. Not for a small direct edit or reviewing a pull request alone. 触发词：多代理协作、派 Codex、子代理、并行冲突、长任务等待、恢复现场、只读评审、付费运行、项目目录、AGENTS.md、决策记录、文档同步、会话残留、hooks、CI、接入项目。
+name: longrun
+description: Runs a long software or research project through the main Claude session, Claude subagents, Codex CLI and Gemini CLI, and keeps the repository in a state the next session can trust. Gives a routing table, briefs and runbooks with stop conditions, one writer per file and per resource, detached jobs, a per-run tool policy for Gemini with each run judged from its output, state in files, round commits checked as committed, capped review, close-out, paid runs, kills and checked reports; plus a .agents/ layout, short layered AGENTS.md, decision notes, docs synced with code, session-residue cleanup and one check list shared by hooks and CI. Use to split work between Claude, Codex and Gemini, run agents in parallel, wait on long jobs, recover after compaction, review delegated work, or set up and maintain a repository for agent work. Not for a small direct edit or reviewing a pull request alone. 触发词：多代理协作、派 Codex、派 Gemini、子代理、并行冲突、长任务等待、恢复现场、只读评审、付费运行、项目目录、AGENTS.md、决策记录、文档同步、会话残留、hooks、CI、接入项目。
 license: MIT
 metadata:
-  version: "2.0.0"
+  version: "3.0.0"
 ---
 
-# Claude Codex Long Run
+# Long Run
 
-Use this skill when one main Claude session runs a project through other agents: Claude subagents for execution, Codex CLI for code and a read-only Codex advisor for direction. It has two layers. The run layer decides where each piece of work goes and keeps it working when jobs outlive the agents that started them, when context is compacted, when permission prompts block a subagent, and when two writers reach for one file. The repository layer keeps what outlasts a session in known places: standing rules every agent loads, decision notes, current documentation and the checks that hold them in shape. Everything is a plain file in the repository, a standard command or a small script in `.agents/bin/`. No daemon, framework or database is needed.
+Use this skill when one main Claude session runs a project through other agents: Claude subagents for execution, Codex CLI for code, a read-only Codex advisor for direction, and Gemini CLI for search, research, document review and document maintenance. It has two layers. The run layer decides where each piece of work goes and keeps it working when jobs outlive the agents that started them, when context is compacted, when permission prompts block a subagent, and when two writers reach for one file. The repository layer keeps what outlasts a session in known places: standing rules every agent loads, decision notes, current documentation and the checks that hold them in shape. Everything is a plain file in the repository, a standard command or a small script in `.agents/bin/`. No daemon, framework or database is needed.
 
 ## Goal
 
 The main session keeps the project correct and moving with the fewest hand-offs that still give isolation and independent checking, and leaves a repository that a new session or a new agent can work in from its files alone. At every point:
 
-- each piece of work sits on one route of the table below, and every worker except a read-only search agent has a brief or runbook naming its objective, inputs, write set, output, stop conditions and check
+- each piece of work sits on one route of the table below, and every worker except a short read-only search has a brief or runbook naming its objective, inputs, write set, output, stop conditions and check
 - no file and no named resource, such as a port or a GPU host, is held by two workers at once
 - every long job runs detached from the agent that waits on it, so a lost wait loses nothing
 - the state of every worker can be rebuilt from `.agents/work/`, git and the run directories, without any agent's memory
-- delegated code counts as done only after its round commit passed the checks as committed and a reviewer who did not write it accepted it against its brief
-- the main session itself executes Codex launches, paid launches, process kills, merges, pushes and deletions, and runs a merge or push only after the user's explicit approval
+- delegated work counts as done only after its round commit passed the checks as committed and a reviewer who did not write it accepted it against its brief
+- a Gemini run counts only when `gemini_run.py` judged it successful, and a Gemini claim counts only after its cited source was opened
+- the main session itself executes Codex and Gemini launches, paid launches, process kills, merges, pushes and deletions, and runs a merge or push only after the user's explicit approval
 - standing rules live in short AGENTS.md files, each fact has one home, and code and documents state current facts without citing work records
 - every number reported to the user traces to a file the main session opened
 
@@ -31,16 +32,17 @@ AGENTS.md                 standing rules and a map of the repository, about 100 
 docs/                     current documentation for users
 .agents/
   checks.json             every check, run by the pipeline, git hooks, CI and agents
+  hooks.json              the Gemini tool-policy hook, inactive outside gemini_run.py
   bin/                    detach.sh, wait.sh, work_state.py, run_checks.py, repo_check.py,
-                          collect_round.py
+                          collect_round.py, gemini_run.py, gemini_hook.py
   notes/                  decision notes: proposed/ implemented/ rejected/ archived/
   work/                   records of work cycles: state.json, ledger.md, briefs/,
-                          reviews/, advice/, reports/, runs/
+                          reviews/, advice/, reports/, runs/, gemini-preflight.json
 ~~~
 
 The three places differ by lifetime. AGENTS.md holds what every task needs. `docs/` and `.agents/notes/` hold what stays true across cycles: current facts and the reasons behind them. `.agents/work/` holds what happened in a cycle and may cite worker ids, rounds and reviews. Content moves from work records into notes and documents only at close-out, by the main session's decision. Code and documents never cite a work record. Notes may cite one as evidence.
 
-Codex builds its instruction chain once per run from the repository root down to its working directory, so a worker started at the worktree root does not load `src/pkg/AGENTS.md`. The brief names those files. Claude Code reads AGENTS.md natively when no CLAUDE.md exists in the directory or above it, and loads a subdirectory's file when it first reads a file there. Keep AGENTS.md as the only instruction source: no CLAUDE.md beside it and no symlink, or a CLAUDE.md whose first line is `@AGENTS.md`.
+Codex builds its instruction chain once per run from the repository root down to its working directory, so a worker started at the worktree root does not load `src/pkg/AGENTS.md`. Gemini CLI loads the AGENTS.md of its working directory. The brief names the nested files for both. Claude Code reads AGENTS.md natively when no CLAUDE.md exists in the directory or above it, and loads a subdirectory's file when it first reads a file there. Keep AGENTS.md as the only instruction source: no CLAUDE.md beside it and no symlink, or a CLAUDE.md whose first line is `@AGENTS.md`.
 
 To set the layout up in a project, or to bring an existing project in without overwriting its rules, hooks or CI, follow [adopt](references/adopt.md). Commands below run from the repository root.
 
@@ -54,10 +56,13 @@ Take the first row that fits. A route is worth its hand-off only when it keeps f
 | A preference, a budget, or a scope the material cannot settle | The user | |
 | A fact in a known file, a command whose output decides the next step, a small edit to a file no worker holds | Main session, directly | |
 | A decision note, the ledger, the state file | Main session; a reporter subagent may draft a note from a facts sheet | |
-| Finding code, files or facts across many locations, or auditing documents against the code | Read-only search subagent | returns the conclusion and paths; no state entry |
+| Finding code, files or facts across many locations, or reading long sources for one conclusion | Gemini fast model, read-only | default policy; returns the conclusion and paths |
+| A research report from papers, web pages and the repository | Gemini strongest model, read-only | `--web`; detached |
+| Review of documents for errors, gaps and drift, or a check of project upkeep: documents against code, stale notes, AGENTS.md size and links | Gemini strongest model, read-only | returns an issue list; issues are candidates |
+| Documentation maintenance not tied to a code change | Gemini strongest model in its own worktree | write set of documents only |
 | A question of direction: how a flow should be fixed, where general and special cases divide, how a candidate pool is chosen, how a boundary is drawn | Advisor: Codex read-only at maximum effort | `-s read-only` |
 | A code change larger than about 5 hours | Split by write set, then route each part | |
-| Two code changes whose write sets overlap | One combined brief and one Codex run | union of the write sets |
+| Two changes whose write sets overlap | One combined brief and one run | union of the write sets |
 | A change to a public interface, a file or data format, a protocol, an evaluation definition, or ordering and concurrency logic | Codex in its own worktree | effort `xhigh` |
 | Any other code change, including documentation that changes with code | Codex in its own worktree | effort `high` |
 | Preparing a worktree, collecting a finished round, tagging a freeze | Pipeline subagent | runbook |
@@ -66,16 +71,17 @@ Take the first row that fits. A route is worth its hand-off only when it keeps f
 | Review of delegated work against its brief | Reviewer subagent, read-only | diffs from the recorded base |
 | Drafting a report from established facts | Reporter subagent | facts sheet, word limits |
 
-Subagents run on the strongest available Claude model unless the runbook is purely mechanical. The built-in Explore and Plan agents load no AGENTS.md, so search runbooks name the rules that matter. Subagents never start Codex or another agent. Each returns to the main session, which alone picks the next route. [Routing detail](references/routing.md) covers splitting, combining, effort escalation and when not to delegate.
+Subagents run on the strongest available Claude model unless the runbook is purely mechanical. Gemini runs only as its own CLI through `gemini_run.py`, never as the model of a Claude subagent, and it writes documents, never code. Where no Gemini CLI is set up, the Gemini read-only rows go to a read-only Claude subagent and documentation maintenance goes to Codex. The built-in Explore and Plan agents load no AGENTS.md, so search runbooks name the rules that matter. Subagents never start Codex, Gemini or another agent. Each returns to the main session, which alone picks the next route. [Routing detail](references/routing.md) covers models and effort, splitting, combining, escalation and when not to delegate.
 
 ## Dispatch
 
-Before a worker starts, its brief or runbook exists and its entry is in `.agents/work/state.json` with status `planned`.
+Before a worker starts, its brief or runbook exists and its entry is in `.agents/work/state.json` with status `planned`. A Gemini search that the main session runs in the foreground in under 10 minutes needs no entry.
 
 - **Codex** gets a brief from [assets/brief.md](assets/brief.md): objective, standing rules, context, write set, out of scope, acceptance with commands and expected results, constraints and the final-message format. Critical constraints come before the changes. The brief always says not to commit. The pipeline subagent prepares the worktree; the main session launches Codex with `.agents/bin/detach.sh`. Commands, overrides and resume are in [dispatch](references/dispatch.md).
+- **Gemini** gets the same brief for documentation maintenance, with a write set of documents, and [assets/gemini-brief.md](assets/gemini-brief.md) for read-only work: the question, the sources, and an answer in which every claim cites a file and line or a URL with a quote. The main session launches it with `.agents/bin/gemini_run.py`, under `detach.sh` for anything longer than a foreground call. The launcher grants the run what its flags list, enforces that with the hook in `.agents/hooks.json`, and judges the result. See [dispatch](references/dispatch.md).
 - **Subagents** get a runbook copied from [assets/runbooks](assets/runbooks/): role, inputs as absolute paths, one new output directory or file, allowed commands, forbidden actions, stop conditions, checklist and return format with a word limit.
 
-Check before each dispatch that the worker's write set and resources are free, and list the nested AGENTS.md files its brief must name:
+Check before each dispatch that the worker's write set and resources are free, that Gemini passed its preflight with the installed agy, and list the nested AGENTS.md files its brief must name:
 
 ~~~sh
 python3 .agents/bin/work_state.py --dispatch w12
@@ -99,21 +105,24 @@ To stop is to take no further action, write what was observed into the output, a
 
 These rules answer failures that recur in long multi-agent runs. [Waiting](references/waiting.md) and [state](references/state.md) hold the commands.
 
-1. **Detach the job from the wait.** Start every Codex job, advisor question and paid run with `.agents/bin/detach.sh`: its own session, stdin closed, logs, a pid file and an exit-status file in a new run directory. Background commands can be stopped at a time limit, SSH connections drop, and subagent sessions end. A detached job survives all three, and its wait can be restarted at any time.
+1. **Detach the job from the wait.** Start every Codex job, Gemini job that may outlast a foreground call, advisor question and paid run with `.agents/bin/detach.sh`: its own session, stdin closed, logs, a pid file and an exit-status file in a new run directory. Background commands can be stopped at a time limit, SSH connections drop, and subagent sessions end. A detached job survives all three, and its wait can be restarted at any time.
 2. **Hold long waits where they last.** Every wait is `.agents/bin/wait.sh`, which only observes. The main session holds any wait that may pass about 25 minutes, as one background command that returns when the job exits. A watcher subagent waits only in the foreground, in calls of at most 10 minutes inside one turn, and never ends its turn while a background child runs. A wait that ended means re-check the job. Only the exit-status file means the job finished.
 3. **Keep state in files.** `.agents/work/state.json` lists every worker with its route, status, write set, resources, worktree, session, round, pid, log and output. `.agents/work/ledger.md` records every ruling. Only the main session writes either, and it updates the worker's pid, log and output at every new round. At the start of a session and after every compaction, run `work_state.py --bearings` and reconcile before acting. A SessionStart hook can run it automatically, as in [checks](references/checks.md).
 4. **One writer per file, one holder per resource.** Parallel writers need disjoint write sets. Paid runs that need the same port or GPU host declare it under `resources`. An overlap means sequence, or one combined brief. A conflict is never resolved by hand outside a brief.
-5. **Override Codex defaults on every call.** Set the sandbox, the effort and the output paths explicitly. A user configuration may default to the highest effort and full access, which a code worker must not inherit. Use `codex exec` rather than an MCP bridge: the `codex mcp-server` command has been removed.
-6. **Bound every loop.** A review cycle has at most 5 rounds. A failed Codex run is resumed once with its failure; a second failure returns to the main session. A worker blocked by a permission prompt stops on the first prompt.
-7. **Verify from artifacts.** Done means an exit-status file, a round commit, a check log of that commit, diffs from the recorded base and a review verdict, never a worker's own summary. A test run that selected no tests is not evidence.
+5. **Override CLI defaults on every call.** For Codex, set the sandbox, the effort and the output paths explicitly. A user configuration may default to the highest effort and full access, which a code worker must not inherit. Use `codex exec` rather than an MCP bridge: the `codex mcp-server` command has been removed. For Gemini, the command after `--` names the model and the effort, and `gemini_run.py` sets the shell sandbox, the tool policy, the timeout and the output paths.
+6. **Bound every loop.** A review cycle has at most 5 rounds. A failed Codex or Gemini run is resumed once with its failure; a second failure returns to the main session. A worker blocked by a permission prompt stops on the first prompt.
+7. **Verify from artifacts.** Done means an exit-status file, a round commit, a check log of that commit, diffs from the recorded base and a review verdict, never a worker's own summary. A test run that selected no tests is not evidence. agy reports a denied tool, a timeout and an empty answer with status `SUCCESS` and exit code 0, so a Gemini run counts only with exit status 0 from `gemini_run.py`.
+8. **Check the Gemini CLI whenever it changes.** agy updates itself. `gemini_run.py --preflight` checks the model, a file read, a listed command, a denied command, a denied write and web search, and records the agy binary it tested. Every Gemini launch, and `--dispatch` of a Gemini worker, refuses to start when agy changed since that record.
 
 ## Rounds and Review
 
-Codex never commits. After each round the pipeline subagent runs `.agents/bin/collect_round.py` detached, with absolute paths, because a subagent's working directory is reset between commands. The script checks that HEAD has not moved, unstages anything Codex staged, records changes outside the write set in `outside.txt`, commits the write set on the worker branch as that round's commit, and writes `diff.patch` from the base and `fix.patch` for the round. It then sets the remaining changes aside in the run directory, runs `run_checks.py` so the log describes the round commit and nothing else, and restores them. A round that only reverted files outside the write set keeps the previous commit.
+Codex and Gemini never commit. After each round the pipeline subagent runs `.agents/bin/collect_round.py` detached, with absolute paths, because a subagent's working directory is reset between commands. The script checks that HEAD has not moved, unstages anything the writer staged, records changes outside the write set in `outside.txt`, commits the write set on the worker branch as that round's commit, and writes `diff.patch` from the base and `fix.patch` for the round. It then sets the remaining changes aside in the run directory, runs `run_checks.py` so the log describes the round commit and nothing else, and restores them. A round that only reverted files outside the write set keeps the previous commit.
 
 The reviewer reads the brief, its acceptance items and the must-check points before the diff, then the diffs and the code at the round commit. It treats the writer's summary as a claim. Each finding names the defect, the location, the impact and the evidence; one substantiated blocker is worth more than a list of preferences, and anything a passing check already enforces is left out. The reviewer also checks that documentation and interface comments changed with behaviour, that no session residue entered code or documents, and which rulings deserve a note. The first line of its verdict is `ACCEPT`, `REQUEST_CHANGES` or `BLOCKED`; the main session treats any other first line as `BLOCKED`. Every entry in `outside.txt` becomes a request to revert that file. Findings outside the brief go to the ledger as candidates.
 
-The main session rules on each verdict. Round 2 resumes the same Codex session with the agreed changes, and Codex verifies each one and either makes it or answers with a technical reason. From round 3, the main session first rereads the failing criteria, since a criterion that keeps failing may not be testable as written, and then rewrites the brief, raises the effort to `xhigh`, or starts a fresh session. After round 5 the main session decides and records the ruling. [Review](references/review.md) has the verdict format.
+Gemini findings, research claims and review issues are candidates. Before one enters the ledger, a note, a brief or a document, the main session or a reviewer opens the cited file and line or URL and finds the quoted text. A claim whose quote is not there is dropped and counted.
+
+The main session rules on each verdict. Round 2 resumes the same Codex session or Gemini conversation with the agreed changes, and the writer verifies each one and either makes it or answers with a technical reason. From round 3, the main session first rereads the failing criteria, since a criterion that keeps failing may not be testable as written, and then rewrites the brief, raises the effort, or starts a fresh session. After round 5 the main session decides and records the ruling. [Review](references/review.md) has the verdict format.
 
 ## Close-out
 
@@ -154,7 +163,9 @@ Agent-written text drifts in two directions: it keeps the history of how it was 
 
 ## Permissions
 
-The permission system blocks subagents more often than the main session. Each block costs a round trip through the user. Narrow allow rules for the scripts in `.agents/bin/` and for read-only commands on a known host remove most of them, while launches, kills, merges and pushes stay with the main session behind a prompt. Permission rules match the usual form of a command and are not a security boundary. They keep accidents rare among cooperating agents. [Permissions](references/permissions.md) gives a settings example.
+The permission system blocks subagents more often than the main session. Each block costs a round trip through the user. Narrow allow rules for the scripts in `.agents/bin/` and for read-only commands on a known host remove most of them, while launches, kills, merges and pushes stay with the main session behind a prompt. Permission rules match the usual form of a command and are not a security boundary. They keep accidents rare among cooperating agents.
+
+Gemini cannot answer a permission prompt in a headless run, so `gemini_run.py` gives each run exactly what its brief needs and nothing else: reads inside the working directory and each `--read` directory, writes to each `--write` path, a default list of read-only commands plus each `--command`, and web search with `--web`. agy auto-approves tools only together with the hook in `.agents/hooks.json`, which decides every call from the run's `policy.json`, and agy's shell sandbox keeps every command read-only. A call outside the policy is denied and the run exits 3. [Permissions](references/permissions.md) gives a settings example and the policy rules.
 
 ## Invariants
 
@@ -162,11 +173,13 @@ The permission system blocks subagents more often than the main session. Each bl
 | --- | --- | --- |
 | Write sets and resources | no file and no resource held by two workers | `work_state.py --dispatch` before each start |
 | Detached jobs | every running job has a pid, a log and, once finished, an exit-status file | `work_state.py --alive` |
-| Codex commits | none: HEAD equals the previous round commit when the round ends | pipeline collection step |
+| Writer commits | none: HEAD equals the previous round commit when the round ends | pipeline collection step |
 | Changed files | inside the write set | `outside.txt`, read by the reviewer |
 | Check evidence | the log describes the round commit with outside changes set aside, and at least one test ran | `tests.log`, read by the reviewer |
 | Acceptance | every item met, each with an output line or file location | review verdict |
 | Review rounds | 5 at most, then a recorded ruling | ledger |
+| Gemini runs | the policy hook ran, agy returned an answer without denial or timeout, and agy is the binary the last passing preflight tested | `gemini_run.py` exit status |
+| Gemini claims | each cites a file and line or a URL with a quote, found there before use | main session, reviewer |
 | Irreversible actions | executed by the main session, merges and pushes after approval | ledger |
 | Subagent writes | inside the worker's new output, or its worktree for the pipeline runner | runbook and `git status` |
 | Instruction files | each AGENTS.md chain within 32768 bytes; no CLAUDE.md that hides AGENTS.md | `repo_check.py` |
@@ -184,10 +197,14 @@ The permission system blocks subagents more often than the main session. Each bl
 | `--alive` reports a pid gone without `exit-status` | The job died. Read the log tails, set the worker to `stopped`, and decide whether to relaunch. |
 | `codex exec` produces no output and no CPU | It was started without stdin closed. Kill it after confirming its pid and command line, and relaunch with `detach.sh`. |
 | A subagent hits a permission prompt | It stops and reports. The main session runs the step itself, asks the user, or adds a narrow rule. |
+| `gemini_run.py` exits 3 | A tool call was denied. Read `tools.jsonl` in the run directory. Grant what the brief needs in a new run, or rule that the answer stands without it. |
+| `gemini_run.py` reports that the policy hook did not run | agy did not load `.agents/hooks.json` in the working directory: the file is missing from that checkout or no longer parses for this agy version. Rerun the preflight. |
+| `gemini_run.py` or `--dispatch` reports a stale preflight | agy changed. Run `gemini_run.py --preflight`. If a probe fails, report it and keep Gemini routes closed until it passes. |
+| A Gemini claim cites a location that lacks the quoted text | Drop the claim, record it in the ledger as rejected, and report how many claims of that answer were checked. |
 | A worker changed a file outside its write set | The reviewer requests the revert. The other worker's change on that file stands. |
 | The checks fail on the round commit but passed in the worker's own run | The worker relied on a change outside its write set. The round goes back with the failing log, or the main session widens the write set in a rewritten brief. |
-| A Codex run exits without finishing | Resume the session once with the failure. On a second failure, the main session rereads the brief. |
-| Codex ignored a rule of a subdirectory | The brief did not name that AGENTS.md. Add the output of `--context` to the brief. |
+| A Codex or Gemini run exits without finishing | Resume the session once with the failure. On a second failure, the main session rereads the brief. |
+| Codex or Gemini ignored a rule of a subdirectory | The brief did not name that AGENTS.md. Add the output of `--context` to the brief. |
 | `repo_check.py` reports a work record cited from code or a document | State the fact itself, or move the reason into a note. |
 | Context was compacted or the session restarted | Run the bearings check before any other action. |
 | A worker reports success but the check log fails | The check log stands. The change goes back with the failing output. |
@@ -196,9 +213,10 @@ The permission system blocks subagents more often than the main session. Each bl
 These moves are never allowed:
 
 - a worker fixing, retrying or working around an anomaly it found
-- Codex committing, pushing or tagging, or any worker editing outside its write set
+- Codex or Gemini committing, pushing or tagging, or any worker editing outside its write set
+- Gemini writing code, running without `gemini_run.py`, or running as the model of a Claude subagent
 - a merge without an `ACCEPT` for the exact commit being merged, or without the user's approval
-- a Codex launch, a paid launch, a kill or a push by a subagent
+- a Codex or Gemini launch, a paid launch, a kill or a push by a subagent
 - a subagent reading `.env` or credential files, or writing the state file, the ledger or a note
 - reporting a result before its exit-status file and collection exist
 - editing, moving or deleting an archived note
@@ -209,6 +227,7 @@ These moves are never allowed:
 - Every merged change has a review verdict, a close-out, a ledger entry and a freeze tag on the accepted commit.
 - Every ruling that guides later work is in a note, and every behaviour change is in the documentation it affects.
 - `run_checks.py --mode ci` passes on the frozen commit.
+- Every Gemini answer that fed a decision came from a run with exit status 0, or has a ledger ruling on its denials, and its claims were checked against their sources.
 - Every paid run has a launch record and a receipt, and every kill has a ledger entry.
 - Every number in the report was checked against its source file.
 - Every action waiting on the user is named, with what will happen on approval.

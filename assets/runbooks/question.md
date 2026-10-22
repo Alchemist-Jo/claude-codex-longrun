@@ -27,7 +27,7 @@ Role: draft one question for the design advisor. Read-only on the repository.
 
 ## Forbidden
 
-Running Codex. Editing any other file. Writing state or ledger. Starting another agent.
+Running Codex or Gemini. Editing any other file. Writing state or ledger. Starting another agent.
 
 ## Stop conditions
 

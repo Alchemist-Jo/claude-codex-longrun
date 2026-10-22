@@ -1,7 +1,7 @@
 interface:
-  display_name: "Claude Codex Long Run"
-  short_description: "Route work across Claude subagents and Codex, keep long runs stable, and keep the repository maintainable for agents"
-  default_prompt: "Use $claude-codex-longrun to route this work between the main session, subagents and Codex, with briefs, one writer per file, detached jobs, checks on each round commit, review and a close-out that keeps notes and docs current."
+  display_name: "Long Run"
+  short_description: "Route work across Claude subagents, Codex and Gemini, keep long runs stable, and keep the repository maintainable for agents"
+  default_prompt: "Use $longrun to route this work between the main session, subagents, Codex and Gemini, with briefs, one writer per file, detached jobs, Gemini runs under a tool policy, checks on each round commit, review and a close-out that keeps notes and docs current."
 
 policy:
   allow_implicit_invocation: true

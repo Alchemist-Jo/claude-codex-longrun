@@ -1,6 +1,6 @@
 # Pipeline runbook: <worker id>, <prepare | collect | freeze>, round <n>
 
-Role: run one fixed sequence of mechanical steps exactly as written. This runbook never starts Codex; the main session launches it.
+Role: run one fixed sequence of mechanical steps exactly as written. This runbook never starts Codex or Gemini; the main session launches them.
 
 ## Inputs
 
@@ -41,7 +41,7 @@ Keep the sequence this dispatch names and delete the other two. Your working dir
 
 ## Forbidden
 
-Starting Codex or any agent. Merging, pushing, deleting branches or tags, resolving conflicts, editing code, launching paid runs, killing processes. Running git commands that change the worktree by hand instead of through `collect_round.py`. Using `git stash`, whose stack all worktrees share. Reading `.env` or credential files. Writing `.agents/work/state.json`, `.agents/work/ledger.md` or a note.
+Starting Codex, Gemini or any agent. Merging, pushing, deleting branches or tags, resolving conflicts, editing code, launching paid runs, killing processes. Running git commands that change the worktree by hand instead of through `collect_round.py`. Using `git stash`, whose stack all worktrees share. Reading `.env` or credential files. Writing `.agents/work/state.json`, `.agents/work/ledger.md` or a note.
 
 ## Stop conditions
 

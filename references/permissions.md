@@ -1,6 +1,6 @@
 # Permissions
 
-Read when a subagent is blocked by a permission prompt, or when setting up a project to reduce prompts.
+Read when a subagent is blocked by a permission prompt, when setting up a project to reduce prompts, or when deciding what a Gemini run may do.
 
 ## What blocks and what to do
 
@@ -58,4 +58,23 @@ A broad rule such as `Bash(ssh gpu-host *)` removes the most prompts, and it als
 
 Permission rules match the command as an agent usually writes it. A command routed through `sh -c`, a different path or a quoted remote string is not matched the same way. The rules keep accidents rare among cooperating agents. The runbook's forbidden actions remain the rule the agents follow.
 
-Launches through `detach.sh` are not in the allow list. They are the main session's, they are infrequent, and `detach.sh` runs whatever follows `--`, so a prompt for each launch costs little and keeps the user aware of what starts. The sandbox flag in a Codex command decides what Codex may write.
+Launches through `detach.sh` and `gemini_run.py` are not in the allow list. They are the main session's, they are infrequent, and `detach.sh` runs whatever follows `--`, so a prompt for each launch costs little and keeps the user aware of what starts. The sandbox flag in a Codex command decides what Codex may write; the policy below decides what Gemini may do.
+
+## Gemini tool policy
+
+agy cannot show a permission prompt in a headless run. It denies the call, still reports status `SUCCESS` and exits 0, and a hook decision of `allow` does not lift that denial. `gemini_run.py` therefore runs agy with `--dangerously-skip-permissions` and moves every decision into the PreToolUse hook in `.agents/hooks.json`, which reads the run's `policy.json`:
+
+| Tool | Allowed when |
+| --- | --- |
+| `read_file` | the path lies inside the working directory or a `--read` directory |
+| `write_file`, `edit_file` | the path is a `--write` file or lies inside a `--write` directory |
+| `run_command` | one listed program with quoted arguments, without pipes, redirections, variables, substitutions, braces or unquoted globs; no option that runs a program, writes a file, follows links or searches hidden or ignored files; every argument that names an existing path lies inside the read roots |
+| `search_web` | the run has `--web` |
+| `manage_task` | the action is `list` or `status` |
+| any other tool, including `ask_question` and the subagent tools | never |
+
+A path named `.env` or `.env.*`, or a link to one, is denied as a file tool path and as a command argument; file contents and search patterns are not checked. The listed commands are `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `rg`, `grep` without recursion, `find` without `-exec`, `-delete` or `-L`, and the `git` subcommands `status`, `diff`, `log`, `show`, `ls-files`, `grep`, `rev-parse` and `blame` without `--open-files-in-pager`, `--ext-diff`, `--output` or `--no-index`, plus each `--command`. `rg` searches recursively and skips hidden and ignored files, which keeps `.env` files out of recursive searches. agy's `--sandbox` makes every command read-only, so a granted build command cannot write either, and it limits command reads to the working directory, system files and the temporary directory. Files in a `--read` directory are therefore read with the file tool. Writes go through the file tools and the write set.
+
+Grant per task what the brief needs and no more. A denied call ends the run with exit status 3. The main session reads `tools.jsonl`, then either grants the missing access in a new run or rules that the answer stands without it.
+
+The hook prints nothing when `LONGRUN_GEMINI_POLICY` is unset, so interactive agy sessions in the project keep agy's own permission flow. A hook that crashes or times out blocks the call. The launcher creates `tools.jsonl` before agy starts; a hook that cannot append to it denies the call and writes `hook-error`, and the run fails. A `hooks.json` that agy cannot parse is skipped with only a log warning, so the launcher requires the `hook-started` file, to which the hook's PreInvocation handler adds a line before each model call. SessionStart cannot serve: it does not fire when a run resumes a conversation.

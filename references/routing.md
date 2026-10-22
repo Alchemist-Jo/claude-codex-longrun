@@ -7,7 +7,7 @@ Read when a piece of work does not fit one row of the routing table, when work h
 Each hand-off transfers context in writing, adds a process that can fail, and adds a report the main session has to read. Multi-agent runs also spend several times the tokens of a single agent. Delegate when at least one of these holds:
 
 - the work would pull many files or long logs into the main context, and only a conclusion is needed back
-- the work writes code, which needs its own worktree and a reviewer who did not write it
+- the work writes code or documents, which needs its own worktree and a reviewer who did not write it
 - the work is a wait or a fixed sequence whose steps the main session would only watch
 - an independent reading is the point, as in review or a directional question
 
@@ -23,6 +23,17 @@ Do it directly when the answer is one file read or one command away, when the ed
 | maximum (`ultra` where the model offers it) | The read-only advisor only |
 
 Set the effort on every call with `-c model_reasoning_effort="high"`. Do not rely on the user's configuration, which may default to the maximum.
+
+## Models and effort for Gemini
+
+| Route | Model | Effort |
+| --- | --- | --- |
+| Search and reading | The fast model, a Flash model | `low` |
+| Research report | The strongest model available | `high` |
+| Document review and upkeep check | The strongest model available | `high` |
+| Documentation maintenance | The strongest model available | `high` |
+
+The model and the effort are part of the command after `--`. Keep both fixed for the whole task; a run that fails is reported before its work moves to another model. A research report or a review from the strongest model still lists candidates: in one project a document review returned 180 candidate issues, many of which were rejected once their locations were checked.
 
 ## Splitting
 
@@ -42,12 +53,13 @@ When two planned briefs need the same file, merge them into one brief with the u
 | Signal | Next step |
 | --- | --- |
 | Codex run exits early or times out | Resume the session once with the failure and the log tail |
+| Gemini run exits 1 or 3 | Read the verdict line, `tools.jsonl` and `agy-stderr.log`; repair the grants or the brief and run once more |
 | Second failure on the same brief | Main session rereads the brief: missing context, an untestable criterion, a write set too small |
 | Review round 3 on the same brief | Rewrite the criterion, raise the effort to `xhigh`, or start a fresh Codex session |
 | Review round 5 still open | Main session rules: accept with a recorded limitation, park the item, or rescope |
 | The same question of direction keeps reappearing in reviews | Take it to the advisor |
 
-Do not escalate by switching the code writer to a Claude subagent. A failed Codex run is reported and its brief repaired.
+Do not escalate by switching the code writer to a Claude subagent. A failed Codex or Gemini run is reported and its brief repaired.
 
 ## Routes for the repository layer
 
@@ -57,8 +69,8 @@ Do not escalate by switching the code writer to a Claude subagent. A failed Code
 | A decision note | Main session, at close-out; a reporter subagent may draft it into its own output |
 | Documentation that changes with code | Inside the code brief's write set, written by Codex |
 | A shared document outside the worker's write set | The close-out worker of that lineage |
-| An audit of documents against code | Read-only search subagent that returns mismatches with evidence; fixes go to Codex |
-| A cleanup of session residue in code or documents | Codex, as a brief listing the files; the reviewer applies [prose](prose.md) |
+| An audit of documents against code | Gemini strongest model, read-only, returning mismatches with evidence; code fixes go to Codex, document fixes to Gemini documentation maintenance |
+| A cleanup of session residue | Codex for code, Gemini documentation maintenance for documents alone, as a brief listing the files; the reviewer applies [prose](prose.md) |
 | A change to `.agents/checks.json`, hooks or CI | Codex with effort `xhigh`, because it changes what every later round counts as evidence |
 
 The built-in Explore and Plan agents start without AGENTS.md. A search runbook that depends on a project rule names the rule or the file.
@@ -67,6 +79,8 @@ The built-in Explore and Plan agents start without AGENTS.md. A search runbook t
 
 - A subagent that monitors another subagent. Subagents do not start or supervise agents. Waits belong to the main session or to one watcher.
 - A reviewer that also fixes. A fix becomes the next Codex round, so the change keeps a single writer.
-- Parallel Codex runs on one worktree. Each writer gets its own worktree, even when the write sets are disjoint.
+- Parallel Codex or Gemini runs on one worktree. Each writer gets its own worktree, even when the write sets are disjoint.
+- Gemini as the model of a Claude subagent. Through a model gateway, the Antigravity provider rejected the Claude Code system prompt, and a subagent would run outside the policy hook. Gemini runs through `gemini_run.py` only.
+- Gemini fixing code it found wrong during document work. The fix becomes a Codex brief; Gemini write sets hold documents only.
 - The advisor asked to choose between two implementations that a test could separate. Write the test instead.
 - A shared document edited by each worker in its own write set. Two edits of the same section conflict at the merge, or one silently replaces the other when a tool rewrites whole blocks. The close-outs edit it one after the other.

@@ -7,7 +7,7 @@ import re
 import sys
 from urllib.parse import unquote, urlsplit
 
-NAME = "claude-codex-longrun"
+NAME = "longrun"
 SKIP = {".git", "build", "node_modules", ".venv", "__pycache__"}
 
 

@@ -1,15 +1,15 @@
 # Dispatch
 
-Read when starting Codex on a brief, resuming a Codex session, or dispatching a subagent.
+Read when starting Codex or Gemini on a brief, resuming a session, or dispatching a subagent.
 
 Commands below run from the project's repository root, which holds the scripts in `.agents/bin/` as described in [adopt](adopt.md).
 
 ## Before any dispatch
 
 1. Write the brief or fill in the runbook.
-2. Add the worker to `.agents/work/state.json` with status `planned`, its route, brief, write set, resources, base commit and a new output directory under `.agents/work/runs/`. A read-only search agent needs no entry: if its result is lost, it is run again.
+2. Add the worker to `.agents/work/state.json` with status `planned`, its route, brief, write set, resources, base commit and a new output directory under `.agents/work/runs/`. A read-only search, by a subagent or by Gemini in the main session's foreground, needs no entry: if its result is lost, it is run again.
 3. Run `python3 .agents/bin/work_state.py --dispatch <id>`. Resolve every error before the worker starts.
-4. For a Codex brief, run `python3 .agents/bin/work_state.py --context <id>` and list its output under Standing rules in the brief. Codex loads the AGENTS.md files from the repository root down to its working directory once, at start; it does not load those of the directories it is about to edit.
+4. For a Codex or Gemini brief, run `python3 .agents/bin/work_state.py --context <id>` and list its output under Standing rules in the brief. Codex loads the AGENTS.md files from the repository root down to its working directory once, at start, and Gemini loads the one in its working directory; neither loads those of the directories it is about to edit.
 5. Set the status to `running` once the pid, or the subagent's start, is recorded.
 
 ## Writing the brief
@@ -21,12 +21,12 @@ Start from [the brief template](../assets/brief.md). The order matters: the writ
 - **Docs impact** in the final message lists documents outside the write set that the change makes wrong, so the close-out can fix them.
 - Documentation that describes the changed code, such as the module README and interface comments, belongs in the write set.
 
-## Who does what for a code worker
+## Who does what for a writing worker
 
 | Step | Owner |
 | --- | --- |
 | Prepare: run directory, worktree, `BRIEF.md` | Pipeline subagent, or the main session |
-| Launch Codex | Main session |
+| Launch Codex or Gemini | Main session |
 | Wait | Main session for long jobs, watcher for short ones, as in [waiting](waiting.md) |
 | Collect: round commit, diffs, checks | Pipeline subagent |
 | Review | Reviewer subagent |
@@ -120,6 +120,83 @@ mkdir .agents/work/runs/a04          # the advisor's out; the answer goes to .ag
 
 Use the highest effort the configured model accepts. An answer at maximum effort can take longer than one foreground call allows, so it runs detached like any other job. The answer is saved verbatim beside the question.
 
+## Gemini
+
+`.agents/bin/gemini_run.py` runs agy, the Gemini CLI, headless. The command after `--` is agy with its model and effort, such as `agy --model <model> --effort high`, or a local wrapper that supplies them; [routing](routing.md) names the model for each route. Use absolute paths for `--run`, `--root` and `--prompt-file`.
+
+### Preflight
+
+Run it once per agy binary, and again whenever a launch reports a stale record:
+
+~~~sh
+run="$PWD/.agents/work/runs/preflight-$(date +%Y%m%d-%H%M)"; mkdir "$run"
+python3 .agents/bin/gemini_run.py --preflight --run "$run" --root "$PWD" -- agy --model <fast model> --effort low
+~~~
+
+It runs six probes, each in its own directory under `$run`: an answer, a file read, a listed command, a denied command, a denied write and a web search. The two denial probes tell the model that the call will be denied and ask it to make the call anyway; a model that only reads the grants refuses on its own, and the hook is never tested. It writes `.agents/work/gemini-preflight.json` with the agy binary it tested and exits 0 only when every probe passed. agy updates itself, so the record also expires when the binary changes. The read and command probes compare the answer with the first line of `AGENTS.md` and with `HEAD`, so the working directory needs both.
+
+### Read-only runs
+
+A search that should finish within 10 minutes runs in the main session's foreground, with the Bash tool timeout above `--timeout`:
+
+~~~sh
+run="$PWD/.agents/work/runs/g04"; mkdir "$run"
+python3 .agents/bin/gemini_run.py --run "$run" --root "$PWD" --timeout 540 \
+  --prompt-file "$PWD/.agents/work/briefs/g04.md" -- agy --model <fast model> --effort low
+~~~
+
+Research, document review and upkeep checks get a state entry with route `gemini` and run detached:
+
+~~~sh
+.agents/bin/detach.sh "$run" -- python3 .agents/bin/gemini_run.py --run "$run" --root "$PWD" --web \
+  --timeout 7200 --prompt-file "$PWD/.agents/work/briefs/g05.md" -- agy --model <strongest model> --effort high
+~~~
+
+Add `--read DIR` for each directory outside the working directory that the brief names; Gemini reads files there with its file tool, since shell commands stay inside the working directory. Add `--command 'CMD ARGS'` for each command beyond the default read-only list. The answer is in `$run/last-message.md`.
+
+### Documentation maintenance
+
+Prepare the worktree as for Codex. Then:
+
+~~~sh
+.agents/bin/detach.sh "$run" -- python3 .agents/bin/gemini_run.py --run "$run" --root "$wt" \
+  --write docs/guide.md --write spec/ --timeout 3600 --prompt-file "$wt/BRIEF.md" \
+  -- agy --model <strongest model> --effort high
+~~~
+
+The `--write` paths repeat the write set of the state entry, relative to the worktree. An acceptance command the brief asks Gemini to run is granted with `--command`, and it runs read-only. Collection, review and rounds follow the Codex steps: Gemini does not commit, and `collect_round.py` makes the round commit.
+
+### Session id and resume
+
+The launcher writes the conversation id to `$run/session`. Record it in the worker's `session` field. For the next round, write `round.md` as for Codex and launch in a separate command:
+
+~~~sh
+session=$(cat "$PWD/.agents/work/runs/w12-r1/session")
+[ -n "$session" ] || { echo "no session id recorded" >&2; exit 1; }
+.agents/bin/detach.sh "$run" -- python3 .agents/bin/gemini_run.py --run "$run" --root "$wt" \
+  --write docs/guide.md --write spec/ --conversation "$session" --prompt-file "$run/round.md" \
+  -- agy --model <strongest model> --effort high
+~~~
+
+Every round passes its grants again: the policy belongs to the run, not to the conversation.
+
+### What the launcher does
+
+1. It refuses to start, with exit status 2, when the run directory holds files of an earlier launch (`policy.json`, `result.json`, `hook-started`, `tools.jsonl` and the like), a path is invalid, the working directory's `.agents/hooks.json` lacks the policy hook, or the preflight record is missing, failed, or names another agy binary or an earlier modification time of it.
+2. It writes `policy.json` and starts agy in the working directory with `--sandbox`, `--dangerously-skip-permissions`, `--print-timeout`, `--log-file`, `--disable-slash-commands` and `LONGRUN_GEMINI_POLICY` pointing at the policy. It passes no `--add-dir`: agy would load that directory's hooks and treat it as a workspace. The prompt opens with the grants, so the model can finish within them.
+3. It keeps agy's JSON output in `result.json`, its stderr in `agy-stderr.log` and its log in `agy.log`, and writes the answer to `last-message.md` and the conversation id to `session`. The hook adds a line to `hook-started` before each model call and to `tools.jsonl` for each tool call; when it cannot write its audit line it denies the call and writes `hook-error`.
+4. A SIGTERM, SIGINT or SIGHUP to the launcher stops agy's process group, so stopping the detached job stops agy too.
+5. It judges the run and prints one line, `gemini_run: <verdict> <reason>`.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | The hook ran, agy returned status `SUCCESS` with a non-empty answer, no tool call was denied and the run did not time out |
+| 1 | The hook did not run or could not write its audit line, the launcher was stopped by a signal, agy failed or timed out, its output was not JSON or not `SUCCESS`, or the answer was empty |
+| 2 | Refused before agy started |
+| 3 | At least one tool call was denied; `tools.jsonl` names it, and `last-message.md` holds whatever answer exists |
+
+agy itself exits 0 after a denial, a timeout and an empty answer alike. Only the launcher's exit status counts.
+
 ## Subagents
 
 Dispatch with the Agent tool, one runbook per agent:
@@ -127,7 +204,7 @@ Dispatch with the Agent tool, one runbook per agent:
 - the prompt is the runbook's absolute path and one line: "Follow this runbook exactly. Stop on any stop condition and report."
 - use the strongest Claude model for review and reporting, and for any runbook with judgement in it
 - run it in the background when the main session has other work, and wait for its notification rather than polling its transcript
-- never give a subagent a runbook that asks it to start Codex or another agent
+- never give a subagent a runbook that asks it to start Codex, Gemini or another agent
 
 A general-purpose subagent loads the root AGENTS.md at start and a subdirectory's AGENTS.md when it first reads a file there. The built-in Explore and Plan agents load neither. A subagent's report is a claim. The main session reads the files it points to before acting on anything that matters.
 

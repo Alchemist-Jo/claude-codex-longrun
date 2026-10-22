@@ -2,7 +2,7 @@
 
 Read when a project has no `.agents/` directory yet, when bringing an existing project under this skill, or when updating the scripts in `.agents/bin/` to a newer version of the skill.
 
-`$H` below is this skill's directory, for example `H=~/.claude/skills/claude-codex-longrun`. Adoption changes the project's instructions, hooks and CI, so the main session plans it and the user approves it before it is committed. A large merge of existing rules can go to Codex as a brief whose write set is the files listed in step 3.
+`$H` below is this skill's directory, for example `H=~/.claude/skills/longrun`. Adoption changes the project's instructions, hooks and CI, so the main session plans it and the user approves it before it is committed. A large merge of existing rules can go to Codex as a brief whose write set is the files listed in step 3.
 
 ## 1. Read what exists
 
@@ -10,7 +10,7 @@ Nothing is overwritten. Before writing anything, record in the adoption brief:
 
 - `git status --short`, the default branch and whether the working tree is clean
 - every `AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md` and `.cursor/rules` file, and what each says
-- `.claude/settings.json` and its hooks and permissions
+- `.claude/settings.json` and its hooks and permissions, and `.agents/hooks.json` or other Gemini CLI files in `.agents/`
 - git hooks: `git config core.hooksPath`, `.pre-commit-config.yaml`, `lefthook.yml`, `.husky/`
 - CI: `.github/workflows/`, `.gitlab-ci.yml`, and which checks are required on the default branch
 - the real commands for install, test and lint, from the README, `Makefile`, `pyproject.toml` or `package.json`, and whether each passes now
@@ -20,14 +20,15 @@ Nothing is overwritten. Before writing anything, record in the adoption brief:
 
 ~~~sh
 mkdir -p .agents/bin .agents/notes .agents/work/briefs .agents/work/reviews .agents/work/advice .agents/work/reports .agents/work/runs
-cp "$H"/scripts/detach.sh "$H"/scripts/wait.sh "$H"/scripts/work_state.py "$H"/scripts/run_checks.py "$H"/scripts/repo_check.py "$H"/scripts/collect_round.py .agents/bin/
+cp "$H"/scripts/detach.sh "$H"/scripts/wait.sh "$H"/scripts/work_state.py "$H"/scripts/run_checks.py "$H"/scripts/repo_check.py "$H"/scripts/collect_round.py "$H"/scripts/gemini_run.py "$H"/scripts/gemini_hook.py .agents/bin/
+test -e .agents/hooks.json || cp "$H/assets/project/gemini-hooks.json" .agents/hooks.json
 cp "$H/assets/project/notes-README.md" .agents/notes/README.md
 cp "$H/assets/state.json" .agents/work/state.json
 printf '# Ledger\n\nWritten by the main session only. One line per event.\n' > .agents/work/ledger.md
 grep -qx '.agents/notes/archived/' .rgignore 2>/dev/null || cat "$H/assets/project/rgignore" >> .rgignore
 ~~~
 
-Set the project name in `state.json` and remove the sample worker. The scripts are copies so that CI, git hooks and remote hosts can run them from the checkout. To update them later, copy again and review the diff.
+Set the project name in `state.json` and remove the sample worker. When `.agents/hooks.json` already existed, add the named hook `longrun-gemini-policy` from [gemini-hooks.json](../assets/project/gemini-hooks.json) to it instead. The hooks file is committed with the scripts, because Gemini loads it from the checkout it runs in, including each worktree. The scripts are copies so that CI, git hooks and remote hosts can run them from the checkout. To update them later, copy again and review the diff.
 
 Large logs under `.agents/work/runs/` can be ignored once their numbers are in a receipt, for example with `.agents/work/runs/*/stdout.log` in `.gitignore`.
 
@@ -74,5 +75,7 @@ python3 .agents/bin/repo_check.py
 python3 .agents/bin/work_state.py --summary
 python3 .agents/bin/run_checks.py --mode commit
 ~~~
+
+When the project will use Gemini, run the preflight from [dispatch](dispatch.md) once the hooks file is committed. It writes `.agents/work/gemini-preflight.json`; every Gemini launch requires a passing record for the installed agy.
 
 The adoption report lists every file created or changed, every rule moved and where it went, the checks with their current results, the hooks installed, and what was not verified, such as whether CI runs on the hosting platform and whether its checks are required.

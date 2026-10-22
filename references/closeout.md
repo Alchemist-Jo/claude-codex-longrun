@@ -19,11 +19,11 @@ Mechanical rulings, such as which round to resume, stay in the ledger. When the 
 
 ## Steps
 
-1. Add a worker in the same lineage, such as `w12.1` with `parent` set to `w12`. It uses w12's worktree, its `base` is `worker/w12@<accepted commit>`, and its write set is the notes and documents on the list. Its route is `codex` when Codex writes the documents and `main` when the main session makes every edit itself. Run `--dispatch` for it. A conflict means another close-out holds the same document; wait until that one is merged.
+1. Add a worker in the same lineage, such as `w12.1` with `parent` set to `w12`. It uses w12's worktree, its `base` is `worker/w12@<accepted commit>`, and its write set is the notes and documents on the list. Its route is `codex` or `gemini` for the writer that makes the edits, and `main` when the main session makes every edit itself. Run `--dispatch` for it. A conflict means another close-out holds the same document; wait until that one is merged.
 2. When another close-out of a shared document was merged after this worker's base, the main session first merges the default branch into the worker branch, so the edit starts from the merged text, and records that merge commit as the close-out's base.
 3. Write the changes in the worktree, with a new run directory such as `.agents/work/runs/w12.1-r1/`:
    - Notes are the main session's. A reporter subagent may draft one from a facts sheet into its own output, using [the note templates](../assets/templates/note-implemented.md); the main session edits it and places it. Follow [notes](notes.md).
-   - Document edits that follow from the code go to the same Codex session as one more round, with the items in `round.md`.
+   - Document edits that follow from the code go to the same Codex session as one more round, with the items in `round.md`. Edits of shared documents that need no knowledge of the code change can go to Gemini instead, launched as in [dispatch](dispatch.md).
    - When the main session made every edit itself, it writes `0` to the run directory's `exit-status` once it is done, so the collection treats the round like any other.
 4. The pipeline collects the close-out round like any other round, with the accepted commit as `--parent`: round commit, diffs, checks in `ci` mode with outside changes set aside.
 5. The reviewer reads `fix.patch` for the close-out with the [documentation](documentation.md) and [prose](prose.md) rules: each fact in its home, no session residue, notes with real alternatives.

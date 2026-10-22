@@ -12,11 +12,15 @@ Read at the start of every session, after every context compaction, when collect
   reviews/          one verdict per review round
   advice/           advisor questions and verbatim answers
   reports/          facts sheets, reports and number checklists
+  gemini-preflight.json
+                    the last Gemini preflight and the agy binary it tested
   runs/<worker>-r<round>/
                     pid, exit-status, stdout.log, stderr.log, last-message.md, round.md,
                     round-commit, diff.patch, fix.patch, outside.txt, outside.patch,
                     outside-new.lst, outside-new.tar, tests.log, tests-exit-status,
-                    collect-report.md, collection/, launch-record.md, collect/
+                    collect-report.md, collection/, launch-record.md, collect/;
+                    for Gemini also policy.json, result.json, agy.log, agy-stderr.log,
+                    tools.jsonl, hook-started, session
 ~~~
 
 The main session alone writes `state.json`, `ledger.md` and the notes. Subagents write only inside the directory or file their runbook names. Commit `.agents/work/` with the project. Large logs can be listed in `.gitignore` once their numbers are in a receipt.
@@ -28,14 +32,14 @@ Start from [assets/state.json](../assets/state.json). One entry per worker:
 | Field | Meaning |
 | --- | --- |
 | `id` | Short and stable, such as `w12`. A worker that continues another, such as a close-out, uses `w12.1` and sets `parent` |
-| `route` | `codex`, `subagent`, `advisor`, `paid-run`, or `main` for work the main session does itself in a worktree, such as a close-out edit |
+| `route` | `codex`, `gemini`, `subagent`, `advisor`, `paid-run`, or `main` for work the main session does itself in a worktree, such as a close-out edit |
 | `status` | See the transitions below |
 | `brief` | Path to the brief or runbook, relative to the repository root |
 | `writes` | Files the worker may change. A directory ends with `/`. Empty for read-only workers |
 | `resources` | Named things only one worker may use at a time, such as `gpu-host/port:6379` or `gpu-host/gpus`. Compared as exact strings |
 | `base` | `branch@commit` the worker started from, recorded once and never recomputed |
-| `worktree` | Required for a Codex worker that writes |
-| `session` | The Codex session id to resume, replaced when a round starts a fresh session |
+| `worktree` | Required for a Codex or Gemini worker that writes |
+| `session` | The Codex session id or Gemini conversation id to resume, replaced when a round starts a fresh session |
 | `round` | The current round number |
 | `host` | `local` or the SSH host name |
 | `pid` | The wrapper's pid from the current run directory |
@@ -101,7 +105,7 @@ Only then choose the next route. A summary held in memory from before the compac
 
 ## Round commits
 
-Codex never commits. After each round, the pipeline subagent runs `.agents/bin/collect_round.py`, which commits the round's write-set changes on the worker branch, so every round has a commit and the reviewer can diff any two of them, and then runs the checks on that commit alone. A subagent's working directory is reset between commands, so the script takes absolute paths and never relies on a `cd`. The checks may outlast one foreground call, so the collection runs detached:
+Codex and Gemini never commit. After each round, the pipeline subagent runs `.agents/bin/collect_round.py`, which commits the round's write-set changes on the worker branch, so every round has a commit and the reviewer can diff any two of them, and then runs the checks on that commit alone. A subagent's working directory is reset between commands, so the script takes absolute paths and never relies on a `cd`. The checks may outlast one foreground call, so the collection runs detached:
 
 ~~~sh
 run=/abs/repo/.agents/work/runs/w12-r2; mkdir "$run/collection"
@@ -114,8 +118,8 @@ run=/abs/repo/.agents/work/runs/w12-r2; mkdir "$run/collection"
 
 Round 1 passes the recorded base as `--parent`. The script:
 
-1. stops unless `exit-status` exists and HEAD equals the parent, which shows that Codex made no commit
-2. resets the index, so a change Codex staged outside the write set cannot enter the commit, and lists every change outside the write set in `outside.txt`
+1. stops unless `exit-status` exists and HEAD equals the parent, which shows that the writer made no commit
+2. resets the index, so a change the writer staged outside the write set cannot enter the commit, and lists every change outside the write set in `outside.txt`
 3. stages the write set path by path, skipping a listed file that was never created, and commits it with `--no-verify`; a round that only reverted outside files keeps the parent; it writes `round-commit`, `diff.patch` from the base and `fix.patch` for the round
 4. saves whatever is left, which lies outside the write set, as `outside.patch` and `outside-new.tar`, and removes it, so the worktree equals the round commit plus ignored files
 5. runs `.agents/bin/run_checks.py --mode ci` in the worktree into `tests.log` and `tests-exit-status`

@@ -7,7 +7,7 @@ Read when dispatching a reviewer, reading a verdict, or ruling on one.
 The [reviewer runbook](../assets/runbooks/reviewer.md), filled in with:
 
 - the brief, the worktree, the recorded base and the round commit
-- the run directory: `diff.patch` from the base, `fix.patch` for this round, `outside.txt` with `outside.patch` and `outside-new.lst`, `last-message.md`, `exit-status`, `tests.log` and `tests-exit-status`
+- the run directory: `diff.patch` from the base, `fix.patch` for this round, `outside.txt` with `outside.patch` and `outside-new.lst`, `last-message.md`, `exit-status`, `tests.log` and `tests-exit-status`, and for a Gemini round `tools.jsonl`
 - the previous verdict, from round 2 on
 - the must-check points: places where a wrong change would still pass the tests, named by the main session
 
@@ -79,10 +79,16 @@ A must-check point or a reviewer rule that proved its worth, because a later rou
 
 | Round | Before launching it |
 | --- | --- |
-| 2 | Resume the same Codex session with only the agreed changes in `round.md`, which asks Codex to verify each one and to make it or give the technical reason against it |
-| 3 | Reread the failing criteria first. Rewrite an untestable criterion, raise the effort to `xhigh`, or start a fresh Codex session with the brief and the open items. Choose one |
+| 2 | Resume the same Codex session or Gemini conversation with only the agreed changes in `round.md`, which asks the writer to verify each one and to make it or give the technical reason against it |
+| 3 | Reread the failing criteria first. Rewrite an untestable criterion, raise the effort, or start a fresh session with the brief and the open items. Choose one |
 | 4 | As round 3 |
 | 5 | The last round. `round.md` lists every open item |
 | After 5 | No further round. The main session decides: accept with a recorded limitation, park the item in the ledger, or rescope into a new brief |
 
 A re-review does not reopen settled items without a new reason.
+
+## Gemini answers
+
+A Gemini document review, upkeep check or research report is a list of candidates. Each item cites `path:line` or a URL with the quoted text, as [the Gemini brief](../assets/gemini-brief.md) requires. Before an item enters the ledger, a brief, a note or a document, the main session or a reviewer subagent opens the location and confirms that the quote is there and supports the item. An item that fails is dropped, and the count of dropped items is reported with the answer. An item without a source is checked from scratch or dropped.
+
+In a Gemini documentation round, the reviewer also reads `tools.jsonl`. A denied call shows where the writer tried to go beyond its brief, and a run that exited 3 needs the main session's ruling before its round is reviewed.

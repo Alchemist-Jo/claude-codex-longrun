@@ -1,6 +1,6 @@
 # 方法依据与参考项目
 
-本文件说明各条规则的来源，常规使用无需读取。v1.0 的运行层与 v2.0 的仓库维护层分别记录。下列文档和项目是设计参考，不能作为本 skill 已改善协作效果的实验结论。核实日期为 2026-10-15。
+本文件说明各条规则的来源，常规使用无需读取。v1.0 的运行层、v2.0 的仓库维护层与 v3.0 的 Gemini 路由分别记录。下列文档和项目是设计参考，不能作为本 skill 已改善协作效果的实验结论。v1.0 与 v2.0 的核实日期为 2026-10-15，v3.0 为 2026-10-22。
 
 ## 用户的运行记录
 
@@ -104,6 +104,57 @@ agent-maintenance 的测试在 macOS 上有 1 项失败：`check_docs.check()` �
 
 独立评审代理审阅了实现，报告 1 个阻断问题、8 个应修问题和 6 个次要问题，均已处理。阻断问题是：runbook 要求子代理先单独执行 `cd` 再执行收集命令，而子代理的工作目录每次都会重置，新增的放置步骤会在主 checkout 中删除未跟踪文件。v1.0 的同一写法只会导致无效的 `git add`。该问题促成了 `collect_round.py`。
 
+## v3.0：Gemini CLI
+
+用户要求把 Gemini CLI（agy，即 Antigravity CLI）作为与 Codex 并列的工作者，承担四类工作：检索与阅读，调研报告，文档审查与项目维护检查，文档维护。Gemini 不写代码，也不做代码评审。此前用户环境中直接调用 agy 的记录有下列问题：
+
+| 问题 | 影响 | 规则 |
+| --- | --- | --- |
+| 无头模式下工具被拒绝时，agy 仍返回 `status: SUCCESS`、空回答和退出码 0 | 被拒绝的运行被当作完成 | `gemini_run.py` 判定结果，有拒绝时退出码为 3 |
+| 经模型网关调用时，Antigravity provider 拒绝 Claude Code 的系统提示，返回 400 或 429 | Gemini 不能作为 Claude 子代理的模型 | Gemini 只通过自己的 CLI 运行 |
+| `--print-timeout` 默认为 0，即不限时；macOS 没有 `timeout` 命令 | 运行可能无限期挂起 | 启动器总是设定超时，超时 300 秒后仍未结束则终止进程组 |
+| Gemini 运行没有用 `detach.sh` 启动，也没有状态记录 | 等待中断后结果丢失 | 与 Codex 相同的分离启动和运行目录 |
+| 用 `--mode plan` 做只读运行时，agy 只返回计划文件的位置 | 只读任务没有可用结果 | 只读由策略实现，不使用 plan 模式 |
+| 一次文档审查返回 180 项候选问题，其中多项在打开原位置后不成立 | 未核对的候选问题可能进入后续工作 | 每项结论附出处，使用前核对 |
+| agy 会自动更新 | 已验证的行为可能改变 | 预检记录绑定 agy 二进制，二进制变化后拒绝启动 |
+| 为避免拒绝，全局设置放行了 `read_file(*)` 与 `write_file(*)` | 所有 agy 会话都能读写任意路径 | 每次运行一份策略，全局设置不再放行 |
+
+### v3.0 实测
+
+环境为 macOS，经本机模型网关调用，日期 2026-10-22。agy 当天从 1.4.4 自动更新到 1.4.5，标注 1.4.5 的行在更新后测得，其余在 1.4.4 上测得。
+
+| 测试 | 结果 |
+| --- | --- |
+| 无头模式运行需要 `command` 权限的命令 | 退出码 0，`status` 为 `SUCCESS`，`response` 为空，`denied_actions` 列出 RunCommand |
+| 项目 `.agents/hooks.json` 中的 PreToolUse hook 返回 `allow`，另加 `permissionOverrides` | hook 被调用，命令仍被无头模式拒绝 |
+| 环境变量 `ANTIGRAVITY_PERM_GRANTS=command(echo)` | 命令仍被拒绝 |
+| `--mode auto` | 提示该账号不可用，按默认模式运行 |
+| `--dangerously-skip-permissions`，hook 返回 `deny` | 命令未执行，模型收到 hook 给出的原因；输出中没有 `denied_actions` |
+| hook 输出 `{}` | 调用被拒绝 |
+| hook 输出为空，退出码 0 | 沿用 agy 自身的权限流程 |
+| hook 以退出码 1 结束、超时被终止、输出 `allow` 但退出码为 1 | 三种情况的调用均被拒绝 |
+| `hooks.json` 中的 SessionStart 写成带 `hooks` 的分组格式 | 整个文件解析失败，只在日志中留下警告，PreToolUse 也未生效 |
+| SessionStart 写成平铺格式 | 无头模式下触发；处理器的工作目录为 `hooks.json` 所在目录，继承启动 agy 时的环境变量 |
+| 1.4.5：`--conversation` 恢复一次运行 | SessionStart 不触发，PreToolUse 照常按新一轮的策略判定 |
+| 1.4.5：PreInvocation 写成平铺格式，处理器不输出 | 新会话与恢复的会话中都在每次模型调用前触发，运行正常完成 |
+| 1.4.5：二进制内嵌的 hook 文档 | 列出 SessionStart、PreToolUse、PostToolUse、PreInvocation、PostInvocation、Stop 六种事件 |
+| 1.4.5：预检的拒绝探测只要求运行 `touch` 或创建文件 | 模型读到 prompt 开头的授权说明后不发起调用，直接说明会被拒绝，hook 未被调用 |
+| 1.4.5：拒绝探测说明调用预期被拒绝并要求照样调用 | 模型发起调用，hook 拒绝，模型转述拒绝原因，启动器以 3 退出，文件不存在 |
+| 1.4.5：`--sandbox` 下用命令读取工作区外的文件 | `~/.zshrc`、home 下的其他目录、`/tmp` 下的其他目录和另一个仓库报 Operation not permitted；`/etc/hosts` 与 `$TMPDIR` 下的文件可读 |
+| 1.4.5：不加 `--add-dir`，用 `read_file` 读取工作区外的文件 | 读取成功，由 hook 决定是否放行 |
+| `--add-dir` 指向另一个含 `.agents/hooks.json` 的目录 | 该目录的 hook 被加载；模型把该目录当作工作区根目录，并向其中写入新文件 |
+| `--sandbox` 下在工作区内外运行 `touch`，运行 `curl`，读取 `~/.gemini` 下的配置 | `touch` 与读取配置报 Operation not permitted，`curl` 成功；`write_file` 与 `edit_file` 正常写入；hook 能写文件 |
+| `--print-timeout 3s` 运行长任务 | 退出码 0，`status` 为 `SUCCESS`，返回部分回答，`duration_seconds` 与用量均为 0；只有 stderr 有超时提示 |
+| `--conversation <id>` 恢复 | conversation id 不变，`num_turns` 增加，先前的上下文保留 |
+| 工作目录中有带标记的 AGENTS.md | 回答中出现该标记 |
+| 模型列出的工具 | `run_command`、`manage_task`、`read_file`、`write_file`、`edit_file`、`ask_question`、`search_web`、`schedule`、`send_message`、`define_subagent`、`invoke_subagent`、`manage_subagents`；没有读取 URL 的工具 |
+
+据此，启动器以 `--sandbox` 与 `--dangerously-skip-permissions` 运行 agy，权限判断全部交给项目 `.agents/hooks.json` 中的 hook，由它按本次运行的 `policy.json` 判定。`LONGRUN_GEMINI_POLICY` 未设置时 hook 不输出，交互会话不受影响。启动器以 PreInvocation 处理器写入的 `hook-started` 证明 hook 已加载；SessionStart 在恢复会话时不触发，不能用于此。拒绝探测必须要求模型发起被拒绝的调用，否则它会按授权说明自行停下，探测测不到 hook。启动器不传 `--add-dir`：该目录的 hook 会被加载并在沙箱外运行，模型也会向其中写文件；其他读取目录由文件工具读取。沙箱只部分限制命令的读取范围，所以 hook 仍检查命令参数中的路径。
+
+### v3.0 实现验证
+
+2026-10-22，agy 1.4.5：155 个单元测试通过，其中 Gemini 相关 81 个，用伪造的 agy 覆盖各判定分支。临时仓库中真实运行预检，六项探测全部通过。同一仓库中一次只读运行与一次以 `--conversation` 恢复的写入运行均以 0 退出，写入落在写入集合内。
+
 ## 参考项目
 
 仓库元数据由调研子代理通过 GitHub API 获取。前三项的许可证和最近推送日期经主会话复核，其余项目因未认证 API 的速率限制未复核。未复制任何项目的代码或原文。
@@ -165,3 +216,6 @@ rulesync 与 ruler 从一个目录生成各代理的规则文件。生成层会�
 - SessionStart hook 在交互会话中自动压缩后的注入：只在无头会话中用 `/compact` 测试过。
 - GitHub Actions 中的检查是否被设为合并前必须通过：属于托管平台设置，本仓库无法验证。
 - 本 skill 尚未在一个完整项目周期中使用。示例目录只验证文件格式和检查脚本的行为。
+- 交互式 agy 会话中项目 hook 的中性行为：空输出只在无头模式下测试过。
+- Gemini 文档维护在真实项目中的完整轮次（worktree、`collect_round.py`、评审）尚未运行，只在临时仓库中验证了启动、恢复与写入集合。
+- 2026-10-21 的 agy 日志中出现过检索重定向失败（"You are not logged into Antigravity"），2026-10-22 的检索探测正常，原因未查明。预检包含一项检索探测。

@@ -15,6 +15,10 @@ These cases guide review of the skill in use. They are not a scoring rubric, and
 - Recovery after a compaction: the session-start hook prints the bearings, or the main session runs them; running workers are reconciled with their exit-status files; nothing is reported from memory.
 - A paid run: a launch record exists before the launch; the kill, if any, targets the recorded process group after comparing its command lines and ends with an empty group; the receipt's numbers each name a file and line.
 - A report: every number in both versions appears in the checklist, and the main session opened each source before sending.
+- A Gemini run whose tool call is denied: `gemini_run.py` exits 3, `tools.jsonl` names the call, and the main session widens the grants or changes the brief before relaunching; the run is not reported as done.
+- A Gemini launch after the CLI updated itself: `gemini_run.py` and `work_state.py --dispatch` refuse with a stale preflight record; the main session runs the preflight before any launch.
+- A Gemini research answer: every claim carries a file line or a URL with a quote; the main session opens a sample of the sources before using the answer, and drops claims whose quote is missing.
+- A Gemini documentation round: Gemini edits in its own worktree and does not commit; `collect_round.py` makes the round commit; an edit outside the write set is in `outside.txt`; round 2 resumes the same conversation with the grants passed again.
 
 ## Repository layer
 

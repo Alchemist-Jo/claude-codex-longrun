@@ -44,4 +44,4 @@ Codex stops adding AGENTS.md files once the chain from the root to its working d
 
 ## Auditing documents
 
-An audit across the repository goes to a read-only search subagent with a runbook that lists the pages, the code they describe and the commands to run. It returns each mismatch with the page, the line, the code location and the evidence. The fixes go to Codex as a brief whose write set is the pages. An audit reports; it never rewrites on its own.
+An audit across the repository goes to a read-only Gemini run, or a read-only search subagent where no Gemini CLI is set up, with a brief that lists the pages, the code they describe and the commands to run. It returns each mismatch with the page, the line, the code location and the evidence. The fixes go to Gemini documentation maintenance as a brief whose write set is the pages, or to Codex when the code must change too. An audit reports; it never rewrites on its own.

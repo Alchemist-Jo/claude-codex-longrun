@@ -1,15 +1,15 @@
-# claude-codex-longrun
+# longrun
 
 **English** | [简体中文](README.zh-CN.md)
 
-[![v2.0](https://img.shields.io/badge/version-v2.0-315a66?style=flat-square)](SKILL.md) [![MIT](https://img.shields.io/badge/license-MIT-647467?style=flat-square)](LICENSE)
+[![v3.0](https://img.shields.io/badge/version-v3.0-315a66?style=flat-square)](SKILL.md) [![MIT](https://img.shields.io/badge/license-MIT-647467?style=flat-square)](LICENSE)
 
-An agent skill for running a long project through several agents at once: a main Claude session that decides, Claude subagents that execute, Codex CLI that writes the code, and a read-only Codex advisor for questions of direction. It has two layers that share one set of files.
+An agent skill for running a long project through several agents at once: a main Claude session that decides, Claude subagents that execute, Codex CLI that writes the code, Gemini CLI that searches, researches and maintains documentation, and a read-only Codex advisor for questions of direction. It has two layers that share one set of files.
 
 - **The run layer** routes each piece of work and keeps the collaboration stable when jobs outlive the agents that started them, when context is compacted, when subagents hit permission prompts, and when two writers reach for the same file.
-- **The repository layer** keeps what outlasts a session in known places: short AGENTS.md files that Codex and Claude Code both load, decision notes with a lifecycle, documentation that changes with the code, and one list of checks used by the pipeline, git hooks, CI and a session-start hook.
+- **The repository layer** keeps what outlasts a session in known places: short AGENTS.md files that Codex, Gemini and Claude Code all load, decision notes with a lifecycle, documentation that changes with the code, and one list of checks used by the pipeline, git hooks, CI and a session-start hook.
 
-It needs no daemon, framework or database. State and records live under `.agents/` in the project, jobs are ordinary processes started by `detach.sh` and observed by `wait.sh`, and four standard-library Python scripts check the state, collect each round, run the project's checks and check the repository.
+It needs no daemon, framework or database. State and records live under `.agents/` in the project, jobs are ordinary processes started by `detach.sh` and observed by `wait.sh`, and six standard-library Python scripts check the state, collect each round, run the project's checks, check the repository, and run Gemini under a tool policy enforced by a hook.
 
 ## Project layout
 
@@ -19,10 +19,12 @@ AGENTS.md                 standing rules and a map, about 100 lines
 docs/                     current documentation
 .agents/
   checks.json             every check, one list
+  hooks.json              the Gemini tool-policy hook
   bin/                    detach.sh, wait.sh, work_state.py, collect_round.py,
-                          run_checks.py, repo_check.py
+                          run_checks.py, repo_check.py, gemini_run.py, gemini_hook.py
   notes/                  decision notes: proposed, implemented, rejected, archived
-  work/                   state.json, ledger.md, briefs, reviews, advice, reports, runs
+  work/                   state.json, ledger.md, gemini-preflight.json, briefs,
+                          reviews, advice, reports, runs
 ~~~
 
 The places differ by lifetime. AGENTS.md holds what every task needs, `docs/` and `.agents/notes/` hold what stays true across cycles, and `.agents/work/` holds what happened in one cycle. Work records reach notes and documents only at close-out, and code and documents never cite them.
@@ -32,14 +34,15 @@ The places differ by lifetime. AGENTS.md holds what every task needs, `docs/` an
 [SKILL.md](SKILL.md) is a guide for the main session:
 
 1. **Adopt.** Bring a project into the layout without overwriting its rules, hooks or CI: merge AGENTS.md, keep CLAUDE.md as an import of it, list the real checks, add the hooks and CI steps that are missing.
-2. **Route.** A table sends each piece of work to the main session, a read-only search agent, Codex at `high` or `xhigh` effort, a reviewer, a watcher, a pipeline runner, a reporter, the advisor, or the user. Launches, kills, merges, pushes and deletions never leave the main session, and merges and pushes wait for the user's approval.
-3. **Dispatch with a contract.** Codex gets a brief with a write set, the nested AGENTS.md files it would not load on its own, acceptance commands and a docs-impact field. Subagents get runbooks with an output directory, forbidden actions and stop conditions.
+2. **Route.** A table sends each piece of work to the main session, a read-only search agent, Codex at `high` or `xhigh` effort, Gemini for search, research, document review and documentation maintenance, a reviewer, a watcher, a pipeline runner, a reporter, the advisor, or the user. Launches, kills, merges, pushes and deletions never leave the main session, and merges and pushes wait for the user's approval.
+3. **Dispatch with a contract.** A Codex or Gemini writer gets a brief with a write set, the nested AGENTS.md files it would not load on its own, acceptance commands and a docs-impact field. A read-only Gemini run gets a question whose answer cites a file line or a URL, with a quote, for every claim. Subagents get runbooks with an output directory, forbidden actions and stop conditions.
 4. **Keep one writer per file and one holder per resource.** `work_state.py --dispatch` refuses a worker whose write set, port or GPU host overlaps one that is held.
 5. **Detach jobs from waits.** `detach.sh` starts jobs in their own session with stdin closed, a pid file and an exit-status file. Completion is the exit-status file, never the end of a wait.
-6. **Review the commit, not the worktree.** Codex never commits. After each round a pipeline subagent runs `collect_round.py`, which commits the write set, sets everything else aside, runs the checks on that commit alone, and restores the rest. A reviewer who did not write the code checks the diffs against the brief, and also checks documentation, session residue and note candidates. Review is capped at 5 rounds.
-7. **Close out.** Rulings that will guide later work become decision notes, and shared documents are updated by one writer at a time, before the freeze tag.
-8. **Recover from files.** A session-start hook prints the bearings after startup, resume and compaction: git status, workers, liveness, ledger tail.
-9. **Report checked numbers.** Reports come in a precise and a plain version with a checklist tying every number to a source file.
+6. **Run Gemini under a policy.** `gemini_run.py` starts the Gemini CLI headless with a tool policy written for that run and enforced by a hook, and exits 0 only when the hook ran, no call was denied, the run finished in time and the answer is not empty. A preflight for each Gemini CLI binary checks an answer, a read, a command, two denials and a web search.
+7. **Review the commit, not the worktree.** Codex and Gemini never commit. After each round a pipeline subagent runs `collect_round.py`, which commits the write set, sets everything else aside, runs the checks on that commit alone, and restores the rest. A reviewer who did not write the code checks the diffs against the brief, and also checks documentation, session residue and note candidates. Review is capped at 5 rounds.
+8. **Close out.** Rulings that will guide later work become decision notes, and shared documents are updated by one writer at a time, before the freeze tag.
+9. **Recover from files.** A session-start hook prints the bearings after startup, resume and compaction: git status, workers, liveness, ledger tail.
+10. **Report checked numbers.** Reports come in a precise and a plain version with a checklist tying every number to a source file.
 
 ## Why these rules
 
@@ -61,31 +64,42 @@ Each rule answers a failure seen in real runs, documented upstream, or measured 
 | Two parallel changes that update one long-lived document overwrite each other ([OpenSpec](https://github.com/Fission-AI/OpenSpec)) | Close-outs that edit a shared document run one at a time |
 | Multi-round edits leave "fixed in round 2" and review references in code and docs | `repo_check.py` reports work-record citations; the reviewer applies the residue rules |
 | Subagents are blocked by permission prompts | Narrow allow rules for the scripts and read-only commands; irreversible steps stay with the main session |
+| The Gemini CLI in headless mode exits 0 with status `SUCCESS` when a tool call was denied, and when its print timeout cut the run short (measured) | `gemini_run.py` judges each run from the output, stderr and the hook's log |
+| A Gemini `hooks.json` that fails to parse is skipped with only a log warning (measured) | A run in which the hook recorded no model call fails |
+| The Gemini CLI updates itself | A preflight record bound to the binary; launches refuse a stale record |
+| A model gateway's Antigravity provider rejects the Claude Code system prompt (measured) | Gemini runs only through its own CLI, never as a subagent model |
+| Global allow rules added to avoid denials let every Gemini session read and write any path | A tool policy per run; global settings grant nothing |
+| A document review by the strongest Gemini model listed issues that did not hold once their locations were opened | Every claim cites a location and a quote and is checked before use |
 
 ## Install and use
 
 ~~~sh
-npx skills add Alchemist-Jo/claude-codex-longrun --skill claude-codex-longrun -g
+npx skills add Alchemist-Jo/longrun --skill longrun -g
 ~~~
 
 Or clone it into the skills directory of Claude Code or Codex:
 
 ~~~sh
-git clone https://github.com/Alchemist-Jo/claude-codex-longrun ~/.claude/skills/claude-codex-longrun
+git clone https://github.com/Alchemist-Jo/longrun ~/.claude/skills/longrun
 ~~~
 
 ~~~text
-Use $claude-codex-longrun to adopt this repository: keep my existing rules and
+Use $longrun to adopt this repository: keep my existing rules and
 CI, add the .agents layout, and tell me which checks fail today.
 ~~~
 
 ~~~text
-Use $claude-codex-longrun to split this refactor between Codex and subagents.
+Use $longrun to split this refactor between Codex and subagents.
 Codex writes the code, a subagent reviews each change against its brief.
 ~~~
 
 ~~~text
-Use $claude-codex-longrun to recover the project state after the compaction,
+Use $longrun to have Gemini check which documents are stale against the code,
+then send the confirmed fixes to a Gemini documentation worker.
+~~~
+
+~~~text
+Use $longrun to recover the project state after the compaction,
 then tell me which workers are still running and what waits for me.
 ~~~
 

@@ -1,6 +1,6 @@
 # Waiting, paid runs and kills
 
-Read when a Codex job or a paid run has started, when a wait was cut off, before a paid launch, and before a kill.
+Read when a Codex or Gemini job or a paid run has started, when a wait was cut off, before a paid launch, and before a kill.
 
 ## Why waits fail
 
