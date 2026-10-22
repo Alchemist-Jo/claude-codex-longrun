@@ -1,7 +1,7 @@
 """Check the work state file and print the bearings for a new session.
 
 The state file (default .agents/work/state.json) lists every worker the main
-session has dispatched: Codex runs, subagents, advisor questions and paid
+session has dispatched: Codex and Gemini runs, subagents, advisor questions and paid
 runs. Only the main session writes it. This script reports, without changing
 anything:
 
@@ -13,7 +13,9 @@ anything:
   collection, and those that died without an exit-status file
 
 With --dispatch ID the named worker is treated as holding its write set and
-resources, so the check answers whether it can start now. With --context ID
+resources, so the check answers whether it can start now. Gemini dispatch
+also requires a passing preflight record matching the agy binary on PATH.
+Codex and Gemini workers that write require their own worktrees. With --context ID
 the script lists the AGENTS.md files below the repository root that apply to
 the worker's write set; Codex started at the worktree root does not load
 them, so the brief names them. With --summary the script prints the worker
@@ -34,8 +36,8 @@ import sys
 STATUSES = ("planned", "running", "review", "changes", "accepted", "merged", "done", "stopped", "abandoned")
 HOLDING = {"running", "review", "changes", "accepted"}
 CLOSED = {"merged", "done", "abandoned"}
-ROUTES = ("codex", "subagent", "advisor", "paid-run", "main")
-PROCESS_ROUTES = {"codex", "advisor", "paid-run"}
+ROUTES = ("codex", "gemini", "subagent", "advisor", "paid-run", "main")
+PROCESS_ROUTES = {"codex", "gemini", "advisor", "paid-run"}
 REQUIRED = ("id", "route", "status", "brief", "out")
 BASE = re.compile(r"^[^@\s]+@[0-9a-f]{7,40}$")
 DEFAULT_STATE = Path(".agents/work/state.json")
@@ -117,8 +119,8 @@ def check_worker(worker_id: str, worker: dict, workers: dict[str, dict], root: P
     for path in writes(worker):
         if path.startswith("/") or ".." in Path(path).parts or re.search(r"[*?\[]", path):
             problems.append(f"ERROR {worker_id}: write path {path!r} must be relative, without globs; mark directories with a trailing /")
-    if writes(worker) and not worker.get("worktree") and route == "codex":
-        problems.append(f"ERROR {worker_id}: a Codex worker that writes needs its own worktree")
+    if writes(worker) and not worker.get("worktree") and route in {"codex", "gemini"}:
+        problems.append(f"ERROR {worker_id}: a {route.capitalize()} worker that writes needs its own worktree")
     if route == "advisor" and writes(worker):
         problems.append(f"ERROR {worker_id}: the advisor route is read-only and cannot hold a write set")
     if status == "running" and route in PROCESS_ROUTES:
@@ -224,6 +226,12 @@ def run(state: Path, dispatch: str | None = None, alive: bool = False) -> tuple[
             dispatch = None
         elif workers[dispatch].get("status") != "planned":
             problems.append(f"ERROR --dispatch {dispatch}: status is {workers[dispatch].get('status')}, expected planned")
+        if dispatch and workers[dispatch].get("route") == "gemini":
+            from gemini_run import preflight_freshness
+
+            reason = preflight_freshness(state.parent / "gemini-preflight.json")
+            if reason:
+                problems.append(f"ERROR --dispatch {dispatch}: {reason}")
     for worker_id, worker in workers.items():
         problems.extend(check_worker(worker_id, worker, workers, root))
     problems.extend(check_shared(workers, dispatch))

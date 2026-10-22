@@ -1,4 +1,4 @@
-"""Collect one finished Codex round: commit the write set, then check that commit alone.
+"""Collect one finished worker round: commit the write set, then check that commit alone.
 
     collect_round.py --run RUN --worktree WT --base REF --parent REF \\
         [--label TEXT] [--mode MODE] -- PATH [PATH ...]
@@ -11,9 +11,9 @@ working directory is reset between commands.
 
 Steps, each stopping the collection when its precondition fails:
 
-1. RUN/exit-status exists: the Codex job finished.
-2. HEAD of WT equals PARENT: Codex made no commit.
-3. The index is reset, so nothing Codex staged outside the write set can
+1. RUN/exit-status exists: the worker job finished.
+2. HEAD of WT equals PARENT: the worker made no commit.
+3. The index is reset, so nothing the worker staged outside the write set can
    enter the commit, and RUN/outside.txt lists every change outside it.
 4. The write set is staged and committed as the round commit, with
    --no-verify; a round that changed nothing in the write set keeps PARENT.
@@ -138,7 +138,7 @@ def collect(run: Path, wt: Path, base: str, parent: str, label: str, mode: str, 
         raise Stop(f"{run / 'exit-status'} does not exist; the job has not finished")
     base_commit, parent_commit = rev(wt, base), rev(wt, parent)
     if rev(wt, "HEAD") != parent_commit:
-        raise Stop(f"HEAD of {wt} is not {parent}; Codex committed or the branch moved")
+        raise Stop(f"HEAD of {wt} is not {parent}; the worker committed or the branch moved")
     git(wt, "reset", "-q")
     outside = outside_changes(wt, paths)
     (run / "outside.txt").write_text("".join(p + "\n" for p in outside), encoding="utf-8")

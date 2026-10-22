@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "project" / ".agents" / "work" / "state.json"
@@ -164,6 +166,45 @@ class FieldTests(StateCase):
         path = self.state(worker("w1", status="running", pid=1, log="a.log"))
         self.assertTrue(self.errors(path, dispatch="w9"))
         self.assertTrue(self.errors(path, dispatch="w1"))
+
+
+class GeminiTests(StateCase):
+    def test_gemini_route_passes(self) -> None:
+        path = self.state(worker("g1", route="gemini", writes=["docs/"]))
+        self.assertEqual(self.errors(path), [])
+
+    def test_writing_gemini_worker_requires_worktree(self) -> None:
+        path = self.state(worker("g1", route="gemini", writes=["docs/"], worktree=None))
+        self.assertTrue(any("worktree" in error for error in self.errors(path)))
+
+    def test_running_gemini_requires_pid_and_log(self) -> None:
+        path = self.state(worker("g1", route="gemini", status="running"))
+        errors = " ".join(self.errors(path))
+        self.assertIn("integer pid", errors)
+        self.assertIn("without a log", errors)
+
+    def test_dispatch_requires_preflight_record(self) -> None:
+        path = self.state(worker("g1", route="gemini"))
+        errors = self.errors(path, dispatch="g1")
+        self.assertEqual(len(errors), 1, errors)
+        self.assertTrue(errors[0].startswith("ERROR --dispatch g1:"))
+        self.assertIn("; run gemini_run.py --preflight", errors[0])
+
+    def test_dispatch_fresh_and_stale_preflight(self) -> None:
+        path = self.state(worker("g1", route="gemini"))
+        binary = path.parent / "agy"
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o755)
+        record = path.parent / "gemini-preflight.json"
+        record.write_text(json.dumps({"passed": True, "agy": str(binary.resolve()),
+                                      "agy_mtime": binary.stat().st_mtime}), encoding="utf-8")
+        with patch.dict(os.environ, {"PATH": str(path.parent)}):
+            self.assertEqual(self.errors(path, dispatch="g1"), [])
+            stat = binary.stat()
+            os.utime(binary, (stat.st_atime, stat.st_mtime + 1))
+            errors = self.errors(path, dispatch="g1")
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("ERROR --dispatch g1: agy changed", errors[0])
 
 
 def dead_pid() -> int:
